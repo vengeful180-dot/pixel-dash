@@ -12,6 +12,7 @@ const chaos = ['calm', 'normal', 'chaos'];
 let fails = 0, good = 0, totalLead = 0, w1LedAt75 = 0, top5Was = 0;
 let slowest = 0;
 const gap56 = [];
+let duoTotal = 0;
 for (let r = 0; r < RACES; r++) {
   const N = rng.int(5, 20);
   const names = [...Array(N)].map((_, i) => 'Runner ' + (i + 1));
@@ -48,6 +49,18 @@ for (let r = 0; r < RACES; r++) {
     fails++;
     console.log('FAIL', { ok, loserOk, sane, same }, JSON.stringify(cfg));
   }
+  // two-runner gags: the pair must be neighbours at that moment
+  for (const g of plan.gags) {
+    if (!g.duo || g.role !== 'a') continue;
+    const D = Planner.DUO[g.type];
+    const k = Math.round(g.t0 / plan.dt);
+    const d = plan.pos[g.other * K + k] - plan.pos[g.i * K + k];
+    if (Math.abs(g.i - g.other) > D.lanes || d < D.gap[0] - 0.2 || d > D.gap[1] + 0.2) {
+      fails++;
+      console.log('DUO FAIL', g.type, g.i, g.other, d.toFixed(2), JSON.stringify(cfg));
+    }
+    duoTotal++;
+  }
   if (N > 5) { const gap = plan.crossT[order[5]] - t5; gap56.push(gap); }
   if (plan.good) good++;
   totalLead += plan.leadChanges.length;
@@ -61,7 +74,7 @@ for (let r = 0; r < RACES; r++) {
 console.log(`races: ${RACES}  failures: ${fails}`);
 console.log(`"exciting" plans: ${(100 * good / RACES).toFixed(1)}%  avg lead changes: ${(totalLead / RACES).toFixed(1)}`);
 console.log(`winner already leading at 75%: ${(100 * w1LedAt75 / RACES).toFixed(1)}%   top-5 at 75% == winners: ${(100 * top5Was / RACES).toFixed(1)}%`);
-console.log(`slowest plan: ${slowest} ms`);
+console.log(`slowest plan: ${slowest} ms   two-runner gags checked: ${duoTotal}`);
 gap56.sort((a, b) => a - b);
 console.log(`gap 5th->6th: median ${gap56[gap56.length >> 1].toFixed(3)}s  max ${gap56[gap56.length - 1].toFixed(3)}s`);
 process.exit(fails ? 1 : 0);

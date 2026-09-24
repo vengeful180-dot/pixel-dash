@@ -78,7 +78,7 @@
     mode: 'setup', viewer: false, cfg: null, plan: null, looks: null, theme: THEMES.day,
     lanes: null, trackTile: null, skyTile: null, ads: [], banners: [],
     camX: 0, zoom: 1, now: 0, raceT: 0, timeScale: 1,
-    particles: [], flash: 0, fade: 0, big: null, line: null, excite: 0.3,
+    particles: [], flash: 0, fade: 0, big: null, line: null, excite: 0.3, sfxQ: [], extraBubbles: [],
     gagPtr: 0, globPtr: 0, linePtr: 0, crossPtr: 0,
     marks: null, reveal: null, rowY: [], clockFrozen: null,
   };
@@ -601,6 +601,53 @@
         if (u < 0.3) fixed('sneeze', () => Art.Pose.sneezeWindup());
         else run(1.3);
         break;
+      // ---- rides and props
+      case 'scooter':
+        if (u < 0.82) { fixed('scoot', () => Art.Pose.scoot()); res.dy = -3; }
+        else run(0.45);
+        break;
+      case 'pogo':
+        fixed('pogo', () => Art.Pose.pogo());
+        res.dy = -sn(4 + Math.abs(Math.sin(t * 8)) * 9);
+        break;
+      case 'chickenhug':
+        if (u < 0.2) run();
+        else if (u < 0.85) timed('hugged', 4, (ph) => Art.Pose.hugged(ph));
+        else run(0.45);
+        break;
+      // ---- runner vs runner
+      case 'throw':
+        if (g.role === 'a') {
+          if (u < 0.12) fixed('twind', () => Art.Pose.throwWind());
+          else if (u < 0.3) fixed('trel', () => Art.Pose.throwRelease());
+          else run();
+        } else if (u < Planner.DUO.throw.impact) run();
+        else if (u < 0.8) timed('dazed', 8, (ph) => Art.Pose.dazed(ph));
+        else run(0.45);
+        break;
+      case 'shove':
+        if (g.role === 'a') { if (u < 0.3) fixed('shove', () => Art.Pose.shove()); else run(); }
+        else if (u < 0.22) run();
+        else if (u < 0.7) { fixed('stumble', () => Art.Pose.stumble()); res.dx = Math.sin(t * 40) * 1.5; }
+        else run(0.45);
+        break;
+      case 'tripup':
+        if (g.role === 'a') { if (u < 0.5) fixed('legout', () => Art.Pose.legOut()); else run(); }
+        else if (u < 0.22) run();
+        else if (u < 0.3) fixed('stumble', () => Art.Pose.stumble());
+        else if (u < 0.75) fixed('fallen', () => Art.Pose.fallen());
+        else if (u < 0.85) fixed('kneel0', () => Art.Pose.kneel(0));
+        else run(0.45);
+        break;
+      case 'fight':
+        if (u < 0.12) fixed('shove', () => Art.Pose.shove());
+        else if (u < 0.84) { res.hidden = true; fixed('stand0', () => Art.Pose.stand(false)); }
+        else timed('dazed', 8, (ph) => Art.Pose.dazed(ph));
+        break;
+      case 'highfive':
+        if (u > 0.25 && u < 0.55) fixed('hi5', () => Art.Pose.highFive());
+        else run(0.6);
+        break;
       default: run(1.3);
     }
     return res;
@@ -634,7 +681,7 @@
       let x, pose, dy = 0, st = null;
       if (G.mode === 'race') {
         st = pickPose(i, G.raceT);
-        x = runnerX(st.p) - cam; pose = st; dy = st.dy || 0;
+        x = runnerX(st.p) - cam + (st.dx || 0); pose = st; dy = st.dy || 0;
       } else if (G.mode === 'marks') {
         x = START_X - 3 - cam;
         const m = G.marks;
@@ -657,11 +704,14 @@
     // effects that sit behind runners
     if (G.mode === 'race') for (const r of info) drawGagBack(r, cam, t);
     for (const r of info) {
-      if (r.x < -30 || r.x > VW + 30) continue;
+      if (r.x < -30 || r.x > VW + 30 || (r.st && r.st.hidden)) continue;
       drawRunnerSprite(r.i, r.pose.key, r.pose.make, r.x, r.gy, r.dy);
       if (G.mode === 'race' && r.st && r.st.v > 6 && Math.random() < 0.03) G.particles.push({ x: r.x - 5 + cam, y: r.gy - 1, vx: -8, vy: -6, g: 14, life: 0, max: 0.35, col: '#e8c9b4', size: 1, world: true, spark: true });
     }
-    if (G.mode === 'race') for (const r of info) drawGagFront(r, cam, t);
+    if (G.mode === 'race') {
+      for (const r of info) drawGagFront(r, cam, t);
+      drawDuos(info, cam, t);
+    }
     return info;
   }
 
@@ -703,6 +753,7 @@
           for (let k = 0; k < 3; k++) w.fillRect(sn(r.x - 30 - Math.random() * 10), sn(r.gy - 8 - Math.random() * 14), 12, 1);
         }
       }
+      if (g.type === 'scooter' && u > 0 && u < 1.6) drawScooter(g, r, u, cam, t);
       if (g.type === 'ufo' || g.type === 'ufogood') {
         if (u > -0.1 && u < 1.15) {
           const enter = smooth(-0.1, 0.2, u), leave = smooth(0.88, 1.15, u);
@@ -787,6 +838,18 @@
       case 'cramp':
         if (Math.random() < 0.15) G.particles.push({ x: r.x + cam, y: headY, vx: (Math.random() - 0.5) * 30, vy: -20, g: 60, life: 0, max: 0.5, col: '#8fd3ff', size: 1, world: true });
         break;
+      case 'pogo': {
+        // stick from the hands down to the ground, spring at the bottom
+        const b = -(r.dy || 0) - 4;
+        const sx = sn(r.x + 3);
+        w.fillStyle = '#9aa3b5'; w.fillRect(sx, sn(r.gy - 19 - b), 1, 15);
+        w.fillStyle = '#1a1a2e'; w.fillRect(sx - 2, sn(r.gy - 19 - b), 5, 1); w.fillRect(sx - 2, sn(r.gy - 5 - b), 5, 1);
+        w.fillStyle = '#c9ced9';
+        for (let k = 0; k < 3; k++) w.fillRect(sx - (k % 2), sn(r.gy - 4 - b + k), 2, 1);
+        if (b < 1 && !g._dust) { g._dust = true; puff(r.x + cam, r.gy - 1, 3, '#e8d9c4', 16, 4); }
+        if (b > 3) g._dust = false;
+        break;
+      }
       case 'sleepy':
         for (let k = 0; k < 3; k++) {
           const ph = (t * 0.8 + k / 3) % 1;
@@ -797,7 +860,194 @@
     }
   }
 
+  // ================================================================ referee, scooter, duos
+  const REF = Art.makeReferee();
+  // Referee runs in from the right, blows the whistle, shows a yellow card, runs off.
+  function drawReferee(x, gy, k, say) {
+    // k: 0..1 through the referee's visit
+    const inX = x + lerp(70, 0, smooth(0, 0.25, k)) + (k > 0.9 ? (k - 0.9) * 700 : 0);
+    let key, make;
+    if (k < 0.25 || k > 0.9) {
+      const f = Math.floor(G.now * 12) % 16, ph = (f / 16) * TAU, flip = k < 0.25;
+      key = 'refrun' + (flip ? 'f' : '') + f;
+      make = () => { const p = Art.Pose.run(ph, 1); p.flip = flip; return p; };
+    } else if (k < 0.55) { key = 'refwh'; make = () => Art.Pose.refWhistle(); }
+    else { key = 'refcard'; make = () => Art.Pose.refCard(); }
+    const spr = Art.runnerSprite(REF, key, make);
+    const S = Art.SPRITE;
+    w.fillStyle = 'rgba(0,0,0,0.28)'; w.fillRect(sn(inX) - 5, gy - 1, 11, 2);
+    w.drawImage(spr, sn(inX) - S.OX, sn(gy - S.OY));
+    if (say && k > 0.25 && k < 0.85) G.extraBubbles.push({ x: inX, y: gy - 36, text: say });
+  }
+
+  function drawScooter(g, r, u, cam, t) {
+    const riding = u < 0.82;
+    let x = r.x, gy = r.gy;
+    if (!riding) {
+      if (g.variant === 'referee') return; // confiscated
+      if (g._park == null) g._park = runnerX(rstate(g.i, g.t0 + g.dur * 0.82).p);
+      x = g._park - cam;
+      if (u > 1.5) return;
+    }
+    const lime = '#7ed957';
+    // deck, wheels, stem, handlebar
+    const ol = '#10101a';
+    if (riding) {
+      // outline first, then the parts: deck, wheels, stem, handlebar, headlight
+      w.fillStyle = ol;
+      w.fillRect(sn(x - 11), gy - 6, 20, 4); w.fillRect(sn(x + 5), gy - 22, 5, 18); w.fillRect(sn(x + 2), gy - 23, 10, 4);
+      w.fillRect(sn(x - 11), gy - 3, 5, 4); w.fillRect(sn(x + 4), gy - 3, 5, 4);
+      w.fillStyle = lime; w.fillRect(sn(x - 10), gy - 5, 18, 2);
+      w.fillStyle = '#2f3a2a'; w.fillRect(sn(x - 10), gy - 4, 18, 1);
+      w.fillStyle = lime; w.fillRect(sn(x + 6), gy - 21, 3, 16);
+      w.fillStyle = '#2a2a2a'; w.fillRect(sn(x + 3), gy - 22, 8, 2);
+      w.fillStyle = '#ffe066'; w.fillRect(sn(x + 9), gy - 17, 2, 2);
+      w.fillStyle = '#3a3a3a'; w.fillRect(sn(x - 10), gy - 2, 3, 2); w.fillRect(sn(x + 5), gy - 2, 3, 2);
+    } else {
+      // tipped over on the track
+      w.fillStyle = ol; w.fillRect(sn(x - 11), gy - 4, 34, 5);
+      w.fillStyle = lime; w.fillRect(sn(x - 10), gy - 3, 18, 2); w.fillRect(sn(x + 8), gy - 3, 14, 2);
+      w.fillStyle = '#3a3a3a'; w.fillRect(sn(x - 10), gy - 1, 3, 1); w.fillRect(sn(x + 4), gy - 1, 3, 1);
+    }
+    if (riding && u > 0.1 && u < 0.62) {
+      w.fillStyle = 'rgba(255,255,255,0.75)';
+      for (let k = 0; k < 3; k++) w.fillRect(sn(x - 26 - Math.random() * 10), sn(gy - 4 - Math.random() * 18), 10, 1);
+    }
+    if (g.variant === 'battery' && u > 0.62 && u < 0.82 && Math.random() < 0.3) {
+      G.particles.push({ x: x - 8 + cam, y: gy - 4, vx: -6, vy: -14, g: -4, life: 0, max: 0.8, col: '#9a9a9a', size: 2, world: true, spark: true });
+    }
+    if (g.variant === 'referee' && u > 0.58 && u < 1.1) drawReferee(x + 20, gy + 2, (u - 0.58) / 0.52, 'NO SCOOTERS!');
+  }
+
+  // Effects for two-runner gags, drawn on top of everyone.
+  function drawDuos(info, cam, t) {
+    const P = G.plan, DUO = Planner.DUO;
+    for (const g of P.gags) {
+      if (g.t0 > G.raceT + 0.5) break;
+      if (g.type === 'chickenhug') { drawChickenHug(g, info[g.i], cam, t); continue; }
+      if (!g.duo || g.role !== 'a') continue;
+      const u = (G.raceT - g.t0) / g.dur;
+      if (u < 0 || u > 1.3) continue;
+      const ra = info[g.i], rb = info[g.other];
+      const imp = DUO[g.type].impact;
+      if (g.type === 'throw') {
+        if (u >= 0.18 && u < imp) {
+          const k = (u - 0.18) / (imp - 0.18);
+          const sx = ra.x + 4, sy = ra.gy - 24 + ra.dy, ex = rb.x + 1, ey = rb.gy - 27 + rb.dy;
+          const img = Art.P.throwables[g.variant];
+          const x = lerp(sx, ex, k), y = lerp(sy, ey, k) - Math.sin(k * Math.PI) * (12 + Math.abs(ex - sx) * 0.15);
+          w.drawImage(img, sn(x - img.width / 2), sn(y - img.height / 2));
+        }
+        if (u >= imp && u < 0.85) {
+          const hx = rb.x - 1, hy = rb.gy - 28 + rb.dy;
+          if (!g._hit) {
+            g._hit = true;
+            const col = { pie: '#fffaf0', balloon: '#3aa0ff', tomato: '#e5372b', chicken: '#ffd23f' }[g.variant];
+            puff(rb.x + 2 + cam, hy + 2, g.variant === 'balloon' ? 18 : 10, col, 50, 22);
+          }
+          const drip = Math.min(5, (u - imp) * 14);
+          if (g.variant === 'pie' || g.variant === 'tomato') {
+            w.fillStyle = g.variant === 'pie' ? '#fffaf0' : '#e5372b';
+            w.fillRect(sn(hx), sn(hy), 7, 5);
+            w.fillRect(sn(hx + 1), sn(hy + 5), 1, drip); w.fillRect(sn(hx + 4), sn(hy + 5), 1, drip * 0.6);
+            if (g.variant === 'tomato') { w.fillStyle = '#ffe0a0'; w.fillRect(sn(hx + 2), sn(hy + 2), 1, 1); w.fillRect(sn(hx + 5), sn(hy + 1), 1, 1); }
+          } else if (g.variant === 'balloon') {
+            w.fillStyle = '#7ec8ff';
+            for (let k = 0; k < 4; k++) w.fillRect(sn(hx + k * 2), sn(hy + 3 + ((t * 30 + k * 5) % 14)), 1, 2);
+          } else {
+            for (let k = 0; k < 3; k++) {
+              const a = t * 7 + (k * TAU) / 3;
+              w.drawImage(Art.P.star, sn(hx + 3 + Math.cos(a) * 7 - 2), sn(hy - 4 + Math.sin(a) * 2 - 2));
+            }
+            w.drawImage(Art.P.throwables.chicken, sn(rb.x + 8), rb.gy - 5);
+          }
+        }
+      } else if (g.type === 'shove' || g.type === 'tripup') {
+        if (u >= imp && u < imp + 0.12) {
+          const cx = (ra.x + rb.x) / 2 + (g.type === 'tripup' ? -6 : 3), cy = (ra.gy + rb.gy) / 2 - (g.type === 'tripup' ? 6 : 16);
+          w.drawImage(Art.P.star, sn(cx - 2), sn(cy - 2));
+          w.fillStyle = '#ffffff'; w.fillRect(sn(cx - 5), sn(cy), 3, 1); w.fillRect(sn(cx + 3), sn(cy), 3, 1);
+          if (!g._hit) { g._hit = true; puff(rb.x + cam, rb.gy - 2, 8, '#e8d9c4', 30, 10); }
+        }
+        if (g.type === 'tripup' && u > 0.3 && u < 0.75) {
+          for (let k = 0; k < 3; k++) {
+            const a = t * 7 + (k * TAU) / 3;
+            w.drawImage(Art.P.star, sn(rb.x + 9 + Math.cos(a) * 7 - 2), sn(rb.gy - 11 + Math.sin(a) * 2 - 2));
+          }
+        }
+      } else if (g.type === 'fight') {
+        const grow = smooth(0.1, 0.17, u) * (1 - smooth(0.8, 0.87, u));
+        if (grow > 0.02) {
+          const cx = (ra.x + rb.x) / 2, cy = (ra.gy + rb.gy) / 2 - 12;
+          for (let k = 0; k < 7; k++) {
+            const a = (k / 7) * TAU + t * 3;
+            const px = cx + Math.cos(a) * 12 * grow + Math.sin(t * 17 + k) * 1.5, py = cy + Math.sin(a) * 8 * grow;
+            w.drawImage(Art.P.puff, sn(px - 7), sn(py - 4));
+          }
+          w.drawImage(Art.P.puff, sn(cx - 7), sn(cy - 4));
+          // fists, shoes and stars flying out
+          const pops = [Art.P.fist, Art.P.shoe, Art.P.star, Art.P.fist];
+          for (let k = 0; k < 2; k++) {
+            const img = pops[Math.floor(t * 9 + k * 2) % pops.length];
+            const a = ((Math.floor(t * 9) * 2.3 + k * 3.1) % TAU);
+            w.drawImage(img, sn(cx + Math.cos(a) * 17 * grow), sn(cy + Math.sin(a) * 11 * grow));
+          }
+          const sym = '#$&!*?';
+          const off = Math.floor(t * 6) % sym.length;
+          const word = (sym + sym).slice(off, off + 4);
+          Art.drawText(w, word, sn(cx - 7), sn(cy - 20 - Math.abs(Math.sin(t * 5)) * 2), '#ffd23f', 1);
+        }
+        if (u > 0.58 && u < 1.12) drawReferee((ra.x + rb.x) / 2 + 24, Math.max(ra.gy, rb.gy) + 3, (u - 0.58) / 0.54, 'BREAK IT UP!');
+      } else if (g.type === 'highfive') {
+        if (u >= imp && u < imp + 0.14) {
+          const cx = (ra.x + rb.x) / 2 + 2, cy = Math.min(ra.gy, rb.gy) - 30;
+          const k = (u - imp) / 0.14, rr = 3 + k * 8;
+          w.fillStyle = '#ffe066';
+          for (let j = 0; j < 8; j++) {
+            const a = (j / 8) * TAU;
+            w.fillRect(sn(cx + Math.cos(a) * rr), sn(cy + Math.sin(a) * rr), 2, 2);
+          }
+          w.fillStyle = '#ffffff'; w.fillRect(sn(cx - 1), sn(cy - 3), 2, 7); w.fillRect(sn(cx - 3), sn(cy - 1), 7, 2);
+        }
+      }
+    }
+  }
+
+  function drawChickenHug(g, r, cam, t) {
+    const u = (G.raceT - g.t0) / g.dur;
+    if (u < 0 || u > 1.35 || !r) return;
+    const fr = Math.floor(t * 10) % 2;
+    // the mascot is big: draw it at double size, feet on the ground
+    const img = Art.P.chicken[u > 0.2 && u < 0.85 ? 0 : fr];
+    const cw = img.width * 2, ch = img.height * 2;
+    let x, y;
+    if (u < 0.2) { const k = u / 0.2; x = lerp(r.x + 60, r.x - 4, k); y = lerp(r.gy + 20, r.gy, k); }
+    else if (u < 0.85) { x = r.x - 4 + Math.sin(t * 14) * 0.8; y = r.gy; }
+    else { const k = (u - 0.85) / 0.5; x = r.x - 4 + k * 110; y = r.gy + k * 40; }
+    w.drawImage(img, 0, 0, img.width, img.height, sn(x), sn(y - ch + 1), cw, ch);
+    if (u > 0.2 && u < 0.85 && Math.random() < 0.08) {
+      G.particles.push({ x: r.x + 6 + cam, y: r.gy - 30, vx: (Math.random() - 0.5) * 10, vy: -18, g: -6, life: 0, max: 0.9, col: '#ff5c8a', size: 2, world: true, spark: true });
+    }
+  }
+
   // ================================================================ camera
+  // The gag the camera should show at race time t (one at a time; never near the finish).
+  function camGag(t) {
+    const P = G.plan;
+    for (const g of P.gags) {
+      if (g.t0 > t + 0.4) break;
+      if (g.type === 'sleepy' || g.role === 'b' || g.t0 + g.dur > P.T1 - 2) continue;
+      if (t >= g.t0 - 0.35 && t < g.t0 + g.dur + 0.1) return g;
+    }
+    return null;
+  }
+  function gagFocus(g, t) {
+    const a = runnerX(rstate(g.i, t).p), ya = G.lanes.ground(g.i);
+    if (!g.duo) return { x: a, y: ya - 14 };
+    const b = runnerX(rstate(g.other, t).p), yb = G.lanes.ground(g.other);
+    return { x: (a + b) / 2, y: (ya + yb) / 2 - 14 };
+  }
+
   function updateCamera(dt) {
     const P = G.plan;
     if (G.mode === 'reveal') return;
@@ -810,6 +1060,8 @@
     }
     let target = (lead + last) / 2 - VW * 0.5;
     target = clamp(target, lead - VW * 0.72, lead - VW * 0.45);
+    // during a gag, keep the action in the middle of the screen
+    if (G.camGag) target = gagFocus(G.camGag, G.raceT).x - VW * 0.5;
     target = clamp(target, 0, FINISH_X() - VW * 0.62);
     G.camX = lerp(G.camX, target, 1 - Math.exp(-dt * 2.2));
   }
@@ -817,6 +1069,7 @@
   // ================================================================ world render
   function renderWorld(t) {
     const cam = sn(G.camX);
+    G.extraBubbles = [];
     w.setTransform(K, 0, 0, K, 0, 0);
     w.clearRect(0, 0, VW, VH);
     if (G.mode === 'reveal') { renderPodium(t); return null; }
@@ -974,21 +1227,35 @@
         pbox(bx, yy - fs * 0.62, wdt, fs * 1.25, Math.max(1, u * 0.8), col, 'rgba(10,10,24,0.85)');
         txt(label, bx + fs * 0.45, yy + 0.5, fs, lum(col) > 0.62 ? '#10101a' : '#ffffff', { weight: 700 });
       }
-      // speech bubbles
+      // speech bubbles: runners, plus the referee
+      const bubble = (x, y, text) => {
+        if (x < -10 || x > VW + 10) return;
+        const bs = clamp(7 * u, 11, 20);
+        const wdt = tw(text, bs, 700) + bs * 1.1;
+        const px = SX(x);
+        const bx = clamp(px - wdt / 2, X0 + 4, X0 + WW - wdt - 4);
+        const by = Math.max(Y0 + 22 * u, SY(y) - bs * 1.3);
+        pbox(bx, by, wdt, bs * 1.5, Math.max(1, u), '#ffffff', '#10101a');
+        sctx.fillStyle = '#10101a';
+        sctx.beginPath(); sctx.moveTo(px - 3 * u, by + bs * 1.5); sctx.lineTo(px + 3 * u, by + bs * 1.5); sctx.lineTo(px, by + bs * 1.5 + 5 * u); sctx.fill();
+        sctx.fillStyle = '#ffffff';
+        sctx.beginPath(); sctx.moveTo(px - 1.8 * u, by + bs * 1.5 - 1); sctx.lineTo(px + 1.8 * u, by + bs * 1.5 - 1); sctx.lineTo(px, by + bs * 1.5 + 3 * u); sctx.fill();
+        txt(text, bx + wdt / 2, by + bs * 0.78, bs, '#10101a', { weight: 700, align: 'center' });
+      };
       for (const b of P.bubbles) {
         if (G.raceT < b.t0 || G.raceT > b.t1) continue;
         const r = info[b.i];
-        if (r.x < -10 || r.x > VW + 10) continue;
-        const bs = clamp(7 * u, 11, 20);
-        const wdt = tw(b.text, bs, 700) + bs * 1.1;
-        const bx = clamp(SX(r.x) - wdt / 2, X0 + 4, X0 + WW - wdt - 4);
-        const by = Math.max(Y0 + 22 * u, SY(r.gy - 36 + (r.dy || 0)) - bs * 1.3);
-        pbox(bx, by, wdt, bs * 1.5, Math.max(1, u), '#ffffff', '#10101a');
-        sctx.fillStyle = '#10101a';
-        sctx.beginPath(); sctx.moveTo(SX(r.x) - 3 * u, by + bs * 1.5); sctx.lineTo(SX(r.x) + 3 * u, by + bs * 1.5); sctx.lineTo(SX(r.x), by + bs * 1.5 + 5 * u); sctx.fill();
-        sctx.fillStyle = '#ffffff';
-        sctx.beginPath(); sctx.moveTo(SX(r.x) - 1.8 * u, by + bs * 1.5 - 1); sctx.lineTo(SX(r.x) + 1.8 * u, by + bs * 1.5 - 1); sctx.lineTo(SX(r.x), by + bs * 1.5 + 3 * u); sctx.fill();
-        txt(b.text, bx + wdt / 2, by + bs * 0.78, bs, '#10101a', { weight: 700, align: 'center' });
+        bubble(r.x, r.gy - 36 + (r.dy || 0), b.text);
+      }
+      for (const b of G.extraBubbles) bubble(b.x, b.y, b.text);
+
+      // slow-motion tag while the gag cam is rolling
+      if (G.timeScale < 0.8 && G.camGag) {
+        const fsz = Math.max(10, 6 * u);
+        const lbl = '● SLOW-MO';
+        const lw = tw(lbl, fsz, 700) + 10 * u;
+        pbox(X0 + 8 * u, Y0 + 26 * u, lw, 11 * u, Math.max(1, u * 0.8), 'rgba(8,10,26,0.8)');
+        txt(lbl, X0 + 13 * u, Y0 + 31.5 * u, fsz, Math.floor(G.now * 3) % 2 ? '#ff6b6b' : '#ffffff', { weight: 700 });
       }
     }
 
@@ -1243,7 +1510,8 @@
     G.camX = 0; G.revealQueued = false; G.fadeOut = null; G.reveal = null;
     G.hype = false; G.slowOn = false; G.stable = null;
     Sfx.musicStop();
-    G.plan.gags.forEach((g) => { delete g._puffed; delete g._p; delete g._shoe; });
+    G.plan.gags.forEach((g) => { delete g._puffed; delete g._p; delete g._shoe; delete g._hit; delete g._park; delete g._dust; });
+    G.sfxQ = []; G.camGag = null; G.focus = null; G.focusT = null;
     const r = Planner.makeRng(G.plan.seed ^ 0xfa15e);
     const fsI = r.chance(0.3) ? r.int(0, G.plan.N - 1) : -1;
     const setDelay = r.range(0.9, 1.7);
@@ -1272,7 +1540,31 @@
     G.marks = m;
   }
 
+  // queue a sound for a moment of race time
+  function sfxAt(t, fn) { G.sfxQ.push({ t, fn }); G.sfxQ.sort((a, b) => a.t - b.t); }
   function fireGag(g) {
+    if (g.role === 'b') return;
+    const at = (u, fn) => sfxAt(g.t0 + u * g.dur, fn);
+    if (g.duo) {
+      const imp = Planner.DUO[g.type].impact;
+      if (g.type === 'throw') {
+        at(0.18, () => Sfx.whoosh());
+        at(imp, () => (g.variant === 'balloon' ? Sfx.splash() : g.variant === 'chicken' ? Sfx.squeak() : Sfx.splat()));
+      } else if (g.type === 'shove' || g.type === 'tripup') at(imp, () => Sfx.thud());
+      else if (g.type === 'fight') {
+        Sfx.pop();
+        for (let u = 0.14; u < 0.8; u += 0.07 + ((u * 97) % 0.06)) at(u, () => Sfx.punch());
+        at(0.72, () => Sfx.whistle());
+      } else if (g.type === 'highfive') at(imp, () => Sfx.clap());
+      return;
+    }
+    if (g.type === 'scooter') {
+      Sfx.hum(g.dur * 0.55 / 0.5);
+      at(0.62, () => (g.variant === 'battery' ? Sfx.sputter() : Sfx.whistle()));
+      return;
+    }
+    if (g.type === 'pogo') { for (let u = 0; u < 1; u += 0.2) at(u, () => Sfx.boing()); return; }
+    if (g.type === 'chickenhug') { at(0.15, () => Sfx.cluck()); at(0.5, () => Sfx.cluck()); return; }
     const map = {
       trip: 'thud', banana: 'slip', laces: 'pop', selfie: 'click', phone: 'ring', hotdog: 'gulp', cramp: 'boing', wrongway: 'boing',
       moonwalk: 'pop', pigeon: 'quack', rain: 'whoosh', autograph: 'pop', flex: 'boing', shoe: 'boing', ufo: 'zap', ufogood: 'zap',
@@ -1287,10 +1579,17 @@
     // slow motion around the close finishes
     const T = G.raceT;
     const slow = (T > P.T1 - 0.9 && T < P.T1 + 0.12) || (T > P.T5 - 0.45 && T < P.T5 + 0.2);
-    G.timeScale = lerp(G.timeScale, slow ? 0.3 : 1, 1 - Math.exp(-dt * 6));
+    // gag cam: slow down and zoom in on whatever is happening
+    const cg = camGag(T);
+    G.camGag = cg;
+    const gagSlow = cg && T > cg.t0 - 0.05 && T < cg.t0 + Math.min(cg.dur * 0.8, 2.4);
+    G.timeScale = lerp(G.timeScale, slow ? 0.3 : gagSlow ? 0.5 : 1, 1 - Math.exp(-dt * 6));
     if (slow !== G.slowOn) { G.slowOn = slow; Sfx.musicMix(slow ? 0.6 : 1, slow); }
-    const zoomOn = T > P.T1 - 1.7 && T < P.T5 + 0.7;
-    G.zoom = lerp(G.zoom, zoomOn ? 1.22 : 1, Math.min(1, dt * 2.5));
+    const finishZoom = T > P.T1 - 1.7 && T < P.T5 + 0.7;
+    const gagZoom = cg && T < cg.t0 + cg.dur;
+    G.zoom = lerp(G.zoom, finishZoom ? 1.22 : gagZoom ? 1.3 : 1, 1 - Math.exp(-dt * 3));
+    if (finishZoom) G.focusT = { x: FINISH_X(), y: TRACK_TOP + G.lanes.trackH * 0.42 };
+    else if (cg) G.focusT = gagFocus(cg, T);
     const sdt = dt * G.timeScale;
     G.raceT += sdt;
     const t = G.raceT;
@@ -1305,6 +1604,7 @@
       if (g.type === 'ducks') { Sfx.quack(); setTimeout(() => Sfx.quack(), 300); }
       if (g.type === 'crowdwave' || g.type === 'mascot') Sfx.cheer(0.5);
     }
+    while (G.sfxQ.length && G.sfxQ[0].t <= t) G.sfxQ.shift().fn();
     while (G.linePtr < P.lines.length && P.lines[G.linePtr].t <= t) {
       const ln = P.lines[G.linePtr++];
       say(ln.text, ln.who, { sim: true, endSim: ln.t + ln.dur });
@@ -1358,10 +1658,14 @@
       info = renderWorld(t);
       // finish zoom crops the world canvas around the finish line
       const z = G.zoom;
-      if (z > 1.01 && G.mode === 'race') {
-        const cx = clamp(FINISH_X() - G.camX, 0, VW), cy = TRACK_TOP + G.lanes.trackH / 2;
+      if (G.focusT) {
+        const k = 1 - Math.exp(-dt * 5);
+        G.focus = G.focus ? { x: lerp(G.focus.x, G.focusT.x, k), y: lerp(G.focus.y, G.focusT.y, k) } : { x: G.focusT.x, y: G.focusT.y };
+      }
+      if (z > 1.01 && G.mode === 'race' && G.focus) {
+        const cx = clamp(G.focus.x - G.camX, 0, VW), cy = G.focus.y;
         const cw = VW / z, ch = VH / z;
-        crop = { x: clamp(cx - cw * 0.55, 0, VW - cw), y: clamp(cy - ch * 0.58, 0, VH - ch), w: cw, h: ch };
+        crop = { x: clamp(cx - cw * 0.5, 0, VW - cw), y: clamp(cy - ch * 0.55, 0, VH - ch), w: cw, h: ch };
       } else crop = { x: 0, y: 0, w: VW, h: VH };
       sctx.imageSmoothingEnabled = false;
       const d = view.dpr;

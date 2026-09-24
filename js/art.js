@@ -369,7 +369,97 @@
       p.mouth = b ? 'open' : null;
       return p;
     },
+    // ---- runner vs runner
+    throwWind() {
+      const p = Pose.run(0.3, 0.6);
+      p.arms[0] = [-2.3, 0.9];
+      p.lean = -0.05;
+      p.mouth = 'smile';
+      return p;
+    },
+    throwRelease() {
+      const p = Pose.run(0.3, 0.6);
+      p.arms[0] = [1.75, 0.1];
+      p.lean = 0.3;
+      p.mouth = 'open';
+      return p;
+    },
+    shove() {
+      const p = Pose.run(0.8, 0.7);
+      p.arms = [[1.45, 0.05], [1.3, 0.1]];
+      p.lean = 0.4;
+      p.mouth = 'open';
+      return p;
+    },
+    legOut() {
+      const p = base();
+      p.legs = [[0.05, 0.05], [-1.25, 0.0]];
+      p.arms = [[0.35, 0.5], [-0.35, 0.4]];
+      p.mouth = 'smile';
+      p.eyes = 'happy';
+      return p;
+    },
+    dazed(ph) {
+      const p = base();
+      p.arms = [[0.55, 2.3 + 0.3 * Math.sin(ph * 2)], [-0.2 + 0.3 * Math.sin(ph), 0.4]];
+      p.mouth = 'open';
+      p.eyes = 'closed';
+      p.lean = -0.1;
+      return p;
+    },
+    highFive() {
+      const p = base();
+      p.arms = [[2.75, 0.15], [-0.15, 0.3]];
+      p.mouth = 'smile';
+      p.eyes = 'happy';
+      return p;
+    },
+    // ---- rides and props
+    scoot() {
+      const p = base();
+      p.legs = [[0.05, 0.05], [-0.3, 0.15]];
+      p.arms = [[1.2, -0.3], [1.05, -0.25]];
+      p.lean = 0.12;
+      p.mouth = 'smile';
+      return p;
+    },
+    pogo() {
+      const p = base();
+      p.legs = [[0.25, 0.5], [0.15, 0.5]];
+      p.arms = [[0.7, 0.5], [0.6, 0.5]];
+      p.mouth = 'open';
+      return p;
+    },
+    hugged(ph) {
+      const p = base();
+      p.arms = [[0.05, 0.05], [-0.05, 0.05]];
+      p.mouth = 'open';
+      p.eyes = ph > Math.PI ? 'closed' : 'open';
+      return p;
+    },
+    // ---- referee
+    refCard() {
+      const p = base();
+      p.arms = [[3.0, 0.0], [-0.1, 0.3]];
+      p.held = 'card';
+      p.mouth = 'open';
+      return p;
+    },
+    refWhistle() {
+      const p = base();
+      p.arms = [[0.35, 2.7], [-0.1, 0.3]];
+      p.held = 'whistle';
+      return p;
+    },
   };
+
+  // The referee: black-and-white stripes, whistle, yellow card.
+  function makeReferee() {
+    return {
+      id: 'ref', color: '#f4f4f4', jersey: '#f4f4f4', jerseyShade: '#c9c9c9', trim: '#1a1a1a', shorts: '#1d1d2b',
+      skin: '#d39a6a', hair: '#2a1b12', style: 'buzz', shoes: '#1c1c1e', acc: 'mustache', band: '#ffffff', stripes: true, cache: new Map(),
+    };
+  }
 
   // ---------------------------------------------------------------- runner rasteriser
   const SW = 56, SH = 58, OX = 28, OY = 50; // sprite size and ground anchor
@@ -482,7 +572,12 @@
     const mid = [(sk.hip[0] + sk.neck[0]) / 2, (sk.hip[1] + sk.neck[1]) / 2];
     // side stripe + bib
     line([sk.hip[0] - 1.2, sk.hip[1]], [sk.neck[0] - 1.2, sk.neck[1] + 1], 1, look.jerseyShade);
-    dot(mid[0] + 1, mid[1], 2, '#fbfbf2');
+    if (look.stripes) {
+      for (const f of [0.28, 0.55, 0.82]) {
+        const q = [sk.hip[0] + (sk.neck[0] - sk.hip[0]) * f, sk.hip[1] + (sk.neck[1] - sk.hip[1]) * f];
+        line([q[0] - 1.5, q[1]], [q[0] + 1.5, q[1]], 1, '#1a1a1a');
+      }
+    } else dot(mid[0] + 1, mid[1], 2, '#fbfbf2');
     dot(sk.hip[0], sk.hip[1] + 0.5, 4, look.shorts);
     drawLeg(sk.legs[0], false, 0);
 
@@ -536,6 +631,8 @@
     else if (pose.held === 'hotdog') { dot(hand[0] + 1, hand[1] - 1, 2, '#e3a857'); dot(hand[0] + 2, hand[1] - 1, 1, '#c8322d'); dot(hand[0] + 3, hand[1] - 1, 1, '#e3a857'); }
     else if (pose.held === 'can') { dot(hand[0], hand[1] - 1, 2, '#e53935'); dot(hand[0], hand[1] - 3, 1, '#ddd'); }
     else if (pose.held === 'paper') { dot(hand[0] + 1, hand[1], 3, '#ffffff'); }
+    else if (pose.held === 'card') { dot(hand[0], hand[1] - 2, 3, '#ffd23f'); dot(hand[0], hand[1] - 4, 3, '#ffd23f'); }
+    else if (pose.held === 'whistle') { dot(hand[0] + 1, hand[1] - 1, 1, '#c9ced9'); }
 
     outline(c);
     return c;
@@ -659,6 +756,25 @@
     P.can = pixmap(['sss', 'rrr', 'rWr', 'rrr', 'sss'], PAL, true);
     P.hotdog = pixmap(['.hhh.', 'rrrrr', '.hhh.'], PAL, true);
     P.bee = pixmap(['.w.', 'yky'], { w: '#e8f6ff', y: '#ffd83a', k: '#141414' }, false);
+    // things runners throw at each other
+    P.throwables = {
+      pie: pixmap(['.WWWW.', 'WWWWWW', 'kkkkkk'], { W: '#fffaf0', k: '#c98a4a' }, true),
+      balloon: pixmap(['.bb.', 'bWbb', 'bbbb', '.bb.', '..k.'], { b: '#3aa0ff', W: '#dff1ff', k: '#1b5fa8' }, true),
+      tomato: pixmap(['.gg.', 'rrrr', 'rWrr', '.rr.'], { g: '#2e9e4f', r: '#e5372b', W: '#ff9b8f' }, true),
+      chicken: pixmap(['....r.', '..yyy.', 'yyyyyo', '.yy...'], { r: '#e53935', y: '#ffd23f', o: '#f29a2e' }, true),
+    };
+    P.puff = pixmap([
+      '....wwww......',
+      '..wwwwwwwww...',
+      '.wwwwWWwwwwww.',
+      'wwwWWWWwwwwwww',
+      'wwwwwwwwwwWwww',
+      '.wwwwwwwwwwwww',
+      '..wwwwwwwwwww.',
+      '....wwwwwww...',
+    ], { w: '#e6dfd2', W: '#ffffff' }, true);
+    P.heart = pixmap(['.p.p.', 'ppppp', '.ppp.', '..p..'], { p: '#ff5c8a' }, false);
+    P.fist = pixmap(['sss', 'sss'], { s: '#f2c7a0' }, true);
   }
 
   // Build a blimp with a message printed on it.
@@ -686,7 +802,7 @@
 
   const Art = {
     rgb, shade, mix, canvas, outline, pixmap, drawText, textWidth,
-    makeLooks, Pose, runnerSprite, P, buildProps, makeBlimp, SPRITE: { W: SW, H: SH, OX, OY }, JERSEYS,
+    makeLooks, makeReferee, Pose, runnerSprite, P, buildProps, makeBlimp, SPRITE: { W: SW, H: SH, OX, OY }, JERSEYS,
   };
   root.Art = Art;
 })(typeof self !== 'undefined' ? self : this);

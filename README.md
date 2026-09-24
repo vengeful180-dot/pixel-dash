@@ -18,6 +18,9 @@ Your picks are scrambled inside the link. Viewers never see the host panel or an
 
 - The start: on your marks, set, the occasional false start, and sometimes a runner sleeps through the gun.
 - 25+ gags: trips, banana peels, shoelaces, selfies, phone calls, hot dogs, cramps, running the wrong way, moonwalking, pigeon attacks, personal rain clouds, UFO abductions (some helpful), energy drinks, dogs and bees chasing people, rocket shoes, and celebrating too early.
+- Runners mess with each other: throwing pies, water balloons, tomatoes and rubber chickens; shoving; sneaky trip-ups; full cartoon fights in a dust cloud until the referee breaks it up; and the occasional high five. These only happen between runners who are actually side by side at that moment.
+- Rides and visitors: an electric scooter (until the battery dies or the referee confiscates it), a pogo stick, and the mascot tackle-hugging someone.
+- Gag cam: when something happens, the race slows down and the camera zooms in on it.
 - Stadium events: the crowd does the wave, ducks cross the infield, the mascot joins in, a blimp flies over, and somebody fires the confetti cannon early.
 - Two commentators react to the gags, lead changes and the final stretch, with banter in between.
 - A slow-motion photo finish, then a podium ceremony that reveals 5th to 1st, plus a note on who just missed out in 6th.

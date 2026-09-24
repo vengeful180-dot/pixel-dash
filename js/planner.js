@@ -32,7 +32,7 @@
   };
   // average seconds between gags; gags never overlap, so each joke gets its moment
   const CHAOS_GAP = { calm: 11, normal: 7, chaos: 4.5 };
-  const GAG_GAP = 1.6;
+  const GAG_GAP = 2.0;
 
   // ---------------------------------------------------------------- RNG
   function mulberry32(a) {
@@ -114,6 +114,9 @@
     secondwind: { kind: 'good', dur: 2.5, speed: () => 1.35 },
     rocket:     { kind: 'good', dur: 1.6, speed: () => 1.8 },
     ufogood:    { kind: 'good', dur: 2.6, speed: (u) => (u < 0.25 ? 0.2 : u < 0.85 ? 1.9 : 0) },
+    scooter:    { kind: 'good', dur: 2.8, speed: (u) => (u < 0.1 ? 0.6 : u < 0.62 ? 1.8 : u < 0.82 ? 0 : 0.45) },
+    pogo:       { kind: 'bad',  dur: 2.2, speed: () => 0.62 },
+    chickenhug: { kind: 'bad',  dur: 1.9, speed: (u) => (u < 0.2 ? 0.8 : u < 0.85 ? 0 : 0.4) },
   };
   // stretch every gag a little so viewers can follow it
   for (const k in GAGS) GAGS[k].dur *= 1.25;
@@ -121,6 +124,23 @@
   const GOOD = Object.keys(GAGS).filter((k) => GAGS[k].kind === 'good');
   const EARLY_DISASTER = ['trip', 'wrongway', 'laces', 'shoe', 'banana', 'moonwalk', 'selfie', 'ufo', 'cramp', 'hotdog'];
   const LATE_FADE = ['celebrate', 'celebrate', 'celebrate', 'trip', 'banana', 'cramp', 'phone', 'tired', 'wave', 'flex', 'pigeon'];
+  // Two-runner gags: runner a starts it, runner b is on the receiving end.
+  // lanes = how many lanes apart they may be; gap = allowed (b's position - a's position) in meters;
+  // impact = when (0..1 through the gag) the hit lands; a/b = speed as a multiple of the pace.
+  const DUO = {
+    throw:    { dur: 2.8, lanes: 3, gap: [1.5, 9], impact: 0.3,
+                a: (u) => (u < 0.22 ? 0.55 : 1), b: (u) => (u < 0.3 ? 1 : u < 0.78 ? 0.1 : 0.5) },
+    shove:    { dur: 2.2, lanes: 1, gap: [-0.4, 1.6], impact: 0.22,
+                a: (u) => (u < 0.22 ? 0.85 : 1.1), b: (u) => (u < 0.22 ? 1 : u < 0.7 ? 0.2 : 0.55) },
+    tripup:   { dur: 2.3, lanes: 1, gap: [-2.2, 0.2], impact: 0.25,
+                a: (u) => (u < 0.35 ? 0.7 : 1), b: (u) => (u < 0.22 ? 0.9 : u < 0.75 ? 0 : 0.35) },
+    fight:    { dur: 3.4, lanes: 1, gap: [-1.6, 1.6], impact: 0.12,
+                a: (u) => (u < 0.12 ? 0.5 : u < 0.84 ? 0 : 0.45), b: (u) => (u < 0.12 ? 0.5 : u < 0.84 ? 0 : 0.45) },
+    highfive: { dur: 1.8, lanes: 1, gap: [-1.2, 1.2], impact: 0.4, a: () => 0.7, b: () => 0.7 },
+  };
+  const DUO_MAX = { calm: 1, normal: 3, chaos: 4 };
+  const THROWABLES = ['pie', 'balloon', 'tomato', 'chicken'];
+  const OBJ_NAME = { pie: 'cream pie', balloon: 'water balloon', tomato: 'tomato', chicken: 'rubber chicken' };
   const GLOBALS = {
     crowdwave: 6, ducks: 8, mascot: 6, blimp: 12, confetti: 3,
   };
@@ -167,6 +187,17 @@
       secondwind: ['{n} finds a second wind!', '{n} has entered BEAST MODE!', 'Here comes {n}! Never count them out!'],
       rocket: ['Are those ROCKET SHOES, {n}?!', '{n} is FLYING! The judges are very confused!'],
       ufogood: ['A UFO grabs {n}... and drops them further AHEAD!', 'The aliens are cheating for {n}! Is that allowed?!'],
+      scooter: ['{n} found an ELECTRIC SCOOTER!', 'Is {n} allowed to use a scooter?! Referee?!', '{n} hopped on a rental scooter. Hope they paid for it.'],
+      pogo: ['{n} is on a POGO STICK!', '{n} switched to a pogo stick. Bold strategy.', 'Boing, boing, boing. That is {n}.'],
+      chickenhug: ['The mascot is hugging {n}! It will NOT let go!', 'Mascot tackle on {n}! Is that even allowed?!', "{n} is getting the world's longest hug from the mascot."],
+    },
+    // two-runner gags: {a} starts it, {b} is on the receiving end, {obj} is what got thrown
+    duo: {
+      throw: ['{a} just threw a {obj} at {b}!', 'Direct hit! {a} gets {b} with a {obj}!', '{b} did NOT see that {obj} coming. Thanks, {a}.', 'Where did {a} even get a {obj}?!'],
+      shove: ['{a} shoves {b}! That is NOT in the rulebook!', 'Hey! {a} just pushed {b}!', '{a} and {b} are getting physical out there!'],
+      tripup: ['{a} sticks a leg out and {b} goes flying! Sneaky!', 'Did {a} just trip {b}?! I saw that!', '{a} is whistling innocently. {b} is on the floor.'],
+      fight: ['A FIGHT! {a} and {b} are going at it!', '{a} and {b} stopped to settle their differences!', '{a} versus {b}! Somebody call the referee!'],
+      highfive: ['{a} and {b} stop for a high five! Sportsmanship!', 'A high five between {a} and {b}! How wholesome!'],
     },
     global: {
       crowdwave: ['The crowd is doing the wave!', 'A Mexican wave goes around the stadium!'],
@@ -404,11 +435,19 @@
     for (let i = 0; i < N; i++) react[i] = 0.1 + rng.range(0, 0.16);
     const byRunner = [...Array(N)].map(() => []);
     const free = (i, t0, dur, margin) => byRunner[i].every((g) => t0 + dur + margin < g.t0 || t0 > g.t0 + g.dur + margin);
-    const addGag = (i, type, t0, durScale) => {
-      const dur = GAGS[type].dur * (durScale || 1);
-      const g = { i, type, t0, dur };
-      gags.push(g); byRunner[i].push(g);
+    // keep each runner's list sorted (gags are also added while the race is being simulated)
+    const insertGag = (g) => {
+      const list = byRunner[g.i];
+      let k = list.length;
+      while (k > 0 && list[k - 1].t0 > g.t0) k--;
+      list.splice(k, 0, g);
+      gags.push(g);
       return g;
+    };
+    const addGag = (i, type, t0, durScale) => {
+      const g = { i, type, t0, dur: GAGS[type].dur * (durScale || 1) };
+      if (type === 'scooter') g.variant = rng.pick(['battery', 'referee']);
+      return insertGag(g);
     };
     const typeUse = {};
     const pickType = (pool) => {
@@ -422,15 +461,14 @@
     const clear = (t0, dur) => gags.every((g) => t0 + dur + GAG_GAP < g.t0 || t0 > g.t0 + g.dur + GAG_GAP)
       && globals.every((g) => t0 + dur + 1 < g.t0 || t0 > g.t0 + 2.5);
 
+    const slotTimes = [];
     if (!safe) {
       // someone sleeps through the gun
       if (rng.chance(0.4)) {
         const i = rng.int(0, N - 1);
         react[i] = rng.range(0.9, 1.5);
-        gags.push({ i, type: 'sleepy', t0: 0, dur: react[i] });
-        byRunner[i].push(gags[gags.length - 1]);
+        insertGag({ i, type: 'sleepy', t0: 0, dur: react[i] });
       }
-      // comeback winners start with a disaster
       const tryPlace = (i, type, lo, hi, durScale) => {
         const dur = GAGS[type].dur * (durScale || 1);
         for (let k = 0; k < 8; k++) {
@@ -455,49 +493,86 @@
         if (role[l] !== 'bolter' || !rng.chance(0.6)) continue;
         tryPlace(l, pickType(GOOD), 2.5, 0.25 * T1);
       }
-      // everything else
+      // the rest is decided during the simulation, when we know who is next to whom
       const gap = CHAOS_GAP[cfg.chaos] || CHAOS_GAP.normal;
-      let ts = rng.range(1.8, 3.2);
-      const gagCount = [...Array(N)].map((_, i) => byRunner[i].length);
-      while (ts < ta - 1.0) {
-        if (clear(ts, 1.2)) {
-          if (ts > 5 && ts < ta - 4 && globals.length < 2 && rng.chance(0.2)) {
-            const types = Object.keys(GLOBALS).filter((k) => !globals.some((g) => g.type === k));
-            if (types.length) {
-              const type = rng.pick(types);
-              globals.push({ type, t0: ts, dur: GLOBALS[type], seed: rng.int(0, 1e9) });
-            }
-          } else {
-            const kind = rng.chance(0.65) ? 'bad' : 'good';
-            const pool = kind === 'bad' ? BAD : GOOD;
-            const type = pickType(pool);
-            const dur = GAGS[type].dur;
-            const cands = [];
-            for (let i = 0; i < N; i++) {
-              if (!clear(ts, dur) || !free(i, ts, dur, 2.5)) continue;
-              if (exact[i]) {
-                if (kind === 'bad' && ts + dur > winnerBadCutoff) continue;
-                if (kind === 'good' && ts + dur > winnerGoodCutoff) continue;
-              } else {
-                if (kind === 'good' && ts + dur > ta - 1.5) continue;
-                if (ts > finishT[i] - 1.0) continue;
-              }
-              cands.push(i);
-            }
-            if (cands.length) {
-              const i = rng.weighted(cands, (c) => 1 / Math.pow(1 + gagCount[c], 2));
-              addGag(i, type, ts);
-              gagCount[i]++;
-            } else {
-              typeUse[type]--;
-            }
+      for (let ts = rng.range(1.8, 3.2); ts < ta - 1.0; ts += gap * rng.range(0.6, 1.4)) slotTimes.push(ts);
+    }
+
+    const gagCount = new Array(N).fill(0);
+    gags.forEach((g) => { gagCount[g.i]++; });
+    const duoMax = safe ? 0 : Math.round((DUO_MAX[cfg.chaos] || 2) * (T1 < 35 ? 0.7 : T1 > 80 ? 1.6 : 1));
+    let duoCount = 0;
+    // can runner i take part in a duo gag in this role?
+    const duoOk = (i, role, type, ts) => {
+      const D2 = DUO[type];
+      if (ts > finishT[i] - 3) return false;
+      if (!exact[i]) return true;
+      const hurts = type === 'fight' || (role === 'b' && type !== 'highfive');
+      return ts + D2.dur <= (hurts ? winnerBadCutoff : winnerGoodCutoff);
+    };
+    // p = everyone's position right now
+    const tryDuo = (ts, p) => {
+      const types = rng.shuffle(Object.keys(DUO)).sort((x, y) => (typeUse[x] || 0) - (typeUse[y] || 0));
+      for (const type of types) {
+        const D2 = DUO[type];
+        if (!clear(ts, D2.dur)) continue;
+        const pairs = [];
+        for (let a = 0; a < N; a++) {
+          for (let b = 0; b < N; b++) {
+            if (a === b || Math.abs(a - b) > D2.lanes) continue;
+            const d = p[b] - p[a];
+            if (d < D2.gap[0] || d > D2.gap[1]) continue;
+            if (!free(a, ts, D2.dur, 2.5) || !free(b, ts, D2.dur, 2.5)) continue;
+            if (!duoOk(a, 'a', type, ts) || !duoOk(b, 'b', type, ts)) continue;
+            pairs.push([a, b]);
           }
         }
-        ts += gap * rng.range(0.6, 1.4);
+        if (!pairs.length) continue;
+        const [a, b] = rng.weighted(pairs, (pr) => 1 / (1 + gagCount[pr[0]] + gagCount[pr[1]]));
+        const variant = type === 'throw' ? rng.pick(THROWABLES) : null;
+        insertGag({ i: a, type, t0: ts, dur: D2.dur, duo: true, role: 'a', other: b, variant });
+        insertGag({ i: b, type, t0: ts, dur: D2.dur, duo: true, role: 'b', other: a, variant });
+        gagCount[a]++; gagCount[b]++;
+        typeUse[type] = (typeUse[type] || 0) + 1;
+        return true;
       }
-    }
-    gags.sort((a, b) => a.t0 - b.t0);
-    for (const list of byRunner) list.sort((a, b) => a.t0 - b.t0);
+      return false;
+    };
+    const decideSlot = (ts, p) => {
+      if (!clear(ts, 1.2)) return;
+      if (ts > 5 && ts < ta - 4 && globals.length < 2 && rng.chance(0.18)) {
+        const types = Object.keys(GLOBALS).filter((k) => !globals.some((g) => g.type === k));
+        if (types.length) {
+          const type = rng.pick(types);
+          globals.push({ type, t0: ts, dur: GLOBALS[type], seed: rng.int(0, 1e9) });
+          return;
+        }
+      }
+      if (duoCount < duoMax && ts > 4 && rng.chance(0.6) && tryDuo(ts, p)) { duoCount++; return; }
+      const kind = rng.chance(0.62) ? 'bad' : 'good';
+      const type = pickType(kind === 'bad' ? BAD : GOOD);
+      const dur = GAGS[type].dur;
+      const cands = [];
+      for (let i = 0; i < N; i++) {
+        if (!clear(ts, dur) || !free(i, ts, dur, 2.5)) continue;
+        if (exact[i]) {
+          if (kind === 'bad' && ts + dur > winnerBadCutoff) continue;
+          if (kind === 'good' && ts + dur > winnerGoodCutoff) continue;
+        } else {
+          if (kind === 'good' && ts + dur > ta - 1.5) continue;
+          if (ts > finishT[i] - 1.0) continue;
+        }
+        cands.push(i);
+      }
+      if (cands.length) {
+        const i = rng.weighted(cands, (c) => 1 / Math.pow(1 + gagCount[c], 2));
+        addGag(i, type, ts);
+        gagCount[i]++;
+      } else {
+        typeUse[type]--;
+      }
+    };
+    const gagSpeed = (g, u) => (g.duo ? DUO[g.type][g.role](u) : GAGS[g.type].speed(u));
 
     // ---- simulate
     const tEndTarget = Math.max(...finishT) + 4;
@@ -508,8 +583,10 @@
     const gp = new Int32Array(N);
     const arrivalSpeed = new Float64Array(N);
     let valid = true;
+    let si = 0;
     for (let k = 0; k < K; k++) {
       const t = k * DT;
+      while (si < slotTimes.length && slotTimes[si] <= t) decideSlot(slotTimes[si++], p);
       const rv = ref.v(t), rp = ref.p(t);
       for (let i = 0; i < N; i++) {
         pos[i * K + k] = p[i];
@@ -525,7 +602,7 @@
           target = 0;
         } else if (g) {
           const u = (t - g.t0) / g.dur;
-          target = GAGS[g.type].speed(u) * Math.max(rv, vref * 0.5);
+          target = gagSpeed(g, u) * Math.max(rv, vref * 0.5);
           up = 30; down = 40;
         } else if (t >= ta) {
           const rem = finishT[i] - t;
@@ -553,6 +630,7 @@
         p[i] = np;
       }
     }
+    gags.sort((x, y) => x.t0 - y.t0 || (x.role === 'b') - (y.role === 'b'));
     for (let i = 0; i < N; i++) if (crossT[i] < 0) valid = false;
 
     // ---- verify the result
@@ -621,6 +699,12 @@
     const ev = [];
     ev.push({ t: 0.15, prio: 6, lines: [pickLine(TXT.start)] });
     for (const g of plan.gags) {
+      if (g.duo) {
+        if (g.role !== 'a') continue;
+        const line = fill(pickLine(TXT.duo[g.type]), { a: nm(g.i), b: nm(g.other), obj: OBJ_NAME[g.variant] || 'shoe' });
+        ev.push({ t: g.t0 + 0.2, prio: 3.2, lines: [line] });
+        continue;
+      }
       const pool = TXT.gag[g.type];
       if (pool) ev.push({ t: g.t0 + (g.type === 'sleepy' ? 0.6 : 0.15), prio: 3, lines: [fill(pickLine(pool), { n: nm(g.i) })] });
     }
@@ -700,11 +784,40 @@
       wave: ['HI MOM!', 'LOVE YOU ALL!'], celebrate: ["I'VE GOT THIS!", 'EASY WIN!', 'TOO EASY!'], sleepy: ['ZZZ...'],
       energy: ['GLUG GLUG', 'POWER UP!'], dog: ['AAAAAH!', 'GOOD BOY?!', 'NOT THE DOG!'], bees: ['BEES!!', 'NOT THE BEES!'],
       sneeze: ['ACHOO!'], secondwind: ['NOT TODAY!', 'SECOND WIND!', 'I BELIEVE!'], rocket: ['WHOA-OA-OA!', 'TOO FAST!'],
-      ufogood: ['THANKS, ALIENS!', 'BEAM ME UP!'],
+      ufogood: ['THANKS, ALIENS!', 'BEAM ME UP!'], scooter: ['WHEEE!', 'ZOOOM!', 'BEEP BEEP!'],
+      pogo: ['BOING BOING!', 'WEEE!'], chickenhug: ['LET ME GO!', 'HELP!', 'TOO TIGHT!'],
     };
-    plan.bubbles = plan.gags.map((g) => ({
-      i: g.i, t0: g.t0 + 0.05, t1: g.t0 + Math.min(g.dur, 3) + 0.3, text: rng.pick(BUB[g.type] || ['!?']),
-    }));
+    // duo bubbles: [who, when (0..1 through the gag), lines]
+    const HIT = { pie: 'SPLAT!', balloon: 'SPLOOSH!', tomato: 'SQUISH!', chicken: 'BONK!' };
+    const DUO_BUB = {
+      throw: [['a', 0, ['CATCH!', 'INCOMING!', 'HEADS UP!', 'FORE!']], ['b', 0.3, null]],
+      shove: [['a', 0, ['MOVE IT!', 'OUTTA MY WAY!', 'EXCUSE ME!']], ['b', 0.25, ['HEY!!', 'RUDE!', 'WHOA!']]],
+      tripup: [['b', 0.24, ['WHOAAA!', 'AAAH!']], ['a', 0.5, ['OOPS...', '*WHISTLES*', 'WASN\'T ME!']]],
+      fight: [['a', 0, ['YOU WANNA GO?!', 'COME HERE!']], ['b', 0.2, ['BRING IT!', 'OH YEAH?!']]],
+      highfive: [['a', 0, ['UP TOP!']], ['b', 0.25, ['YEAH!', 'NICE!']]],
+    };
+    plan.bubbles = [];
+    for (const g of plan.gags) {
+      if (g.duo) {
+        for (const [who, at, lines] of DUO_BUB[g.type]) {
+          if (who !== g.role) continue;
+          const t0 = g.t0 + at * g.dur;
+          plan.bubbles.push({ i: g.i, t0, t1: t0 + 1.6, text: lines ? rng.pick(lines) : HIT[g.variant] });
+        }
+        continue;
+      }
+      plan.bubbles.push({ i: g.i, t0: g.t0 + 0.05, t1: g.t0 + Math.min(g.dur, 3) + 0.3, text: rng.pick(BUB[g.type] || ['!?']) });
+      if (g.type === 'scooter') {
+        const t0 = g.t0 + 0.63 * g.dur;
+        plan.bubbles.push({ i: g.i, t0, t1: t0 + 1.4, text: g.variant === 'battery' ? 'BATTERY 0%?!' : 'AW, COME ON!' });
+      }
+    }
+    // a runner shows one bubble at a time
+    plan.bubbles.sort((x, y) => x.t0 - y.t0);
+    for (const b of plan.bubbles) {
+      const next = plan.bubbles.find((o) => o !== b && o.i === b.i && o.t0 > b.t0);
+      if (next && next.t0 < b.t1) b.t1 = next.t0;
+    }
 
     // bios for the intro screen
     const bios = rng.shuffle(TXT.bios);
@@ -737,7 +850,7 @@
     return best;
   }
 
-  const Planner = { planRace, makeRng, hashStr, LENGTHS, GAGS, GLOBALS, TXT, DT, fill };
+  const Planner = { planRace, makeRng, hashStr, LENGTHS, GAGS, DUO, GLOBALS, TXT, DT, fill };
   if (typeof module !== 'undefined' && module.exports) module.exports = Planner;
   else root.Planner = Planner;
 })(typeof self !== 'undefined' ? self : this);

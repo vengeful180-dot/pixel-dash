@@ -250,6 +250,19 @@
     },
     firework() { noise(0.6, 0.25, 1500, 'lowpass', 0, 200); },
     tick() { tone(1200, 0.04, 'square', 0.06); },
+    splat() { noise(0.18, 0.4, 700, 'lowpass', 0, 200); tone(220, 0.14, 'sine', 0.25, 70); },
+    splash() { noise(0.35, 0.3, 2500, 'bandpass', 0, 600); },
+    squeak() { tone(1300, 0.12, 'square', 0.07, 900); tone(1500, 0.1, 'square', 0.06, 1100, 0.12); },
+    punch() { tone(140 + Math.random() * 60, 0.09, 'sine', 0.35, 60); noise(0.06, 0.2, 900); },
+    clap() { noise(0.07, 0.45, 2600, 'highpass'); noise(0.05, 0.3, 1800, 'bandpass', 0.02); },
+    cluck() { tone(760, 0.06, 'square', 0.08, 560); tone(700, 0.08, 'square', 0.08, 520, 0.11); },
+    hum(dur) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      osc('sawtooth', 110, t, dur, 0.035 * FX, master, { hold: 0.9, release: 0.15, vibrato: true });
+      osc('square', 220, t, dur, 0.015 * FX, master, { hold: 0.9, release: 0.15 });
+    },
+    sputter() { for (let k = 0; k < 4; k++) tone(90 - k * 10, 0.07, 'square', 0.08, 50, k * 0.13); },
     // current output loudness (RMS), handy for checking that sound is playing
     level() {
       if (!analyser) return 0;
