@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pixel Dash</title>
+  <meta name="description" content="A chaotic pixel-art stadium race. Anyone can win!">
+  <meta property="og:title" content="Pixel Dash">
+  <meta property="og:description" content="A chaotic pixel-art stadium race. Anyone can win!">
+  <meta name="theme-color" content="#0b0f24">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%230b0f24'/%3E%3Crect x='2' y='2' width='2' height='12' fill='%23fff'/%3E%3Crect x='4' y='2' width='10' height='2' fill='%23ffd23f'/%3E%3Crect x='4' y='6' width='10' height='2' fill='%23ffd23f'/%3E%3Crect x='4' y='4' width='2' height='2' fill='%23111'/%3E%3Crect x='8' y='4' width='2' height='2' fill='%23111'/%3E%3Crect x='12' y='4' width='2' height='2' fill='%23111'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="screen" aria-label="Race track"></canvas>
+
+  <!-- Host panel (only when there is no race in the link) -->
+  <section id="setup" class="overlay" hidden>
+    <div class="card setup-card">
+      <h1 class="logo">PIXEL<span>DASH</span></h1>
+      <p class="tag">Host panel — set up your race. Viewers of your share link never see this page.</p>
+
+      <label class="field">Race name
+        <input id="f-title" maxlength="40" autocomplete="off">
+      </label>
+
+      <label class="field">Runners <small>one name per line · 5 to 20</small>
+        <textarea id="f-names" rows="8" spellcheck="false"></textarea>
+      </label>
+      <div class="row-info"><span id="f-count"></span><button id="f-example" type="button" class="link">Use example names</button></div>
+
+      <fieldset class="winners">
+        <legend>Your top 5 <small>they will finish in exactly this order</small></legend>
+        <label class="place p1"><span>1ST</span><select data-place="0"></select></label>
+        <label class="place p2"><span>2ND</span><select data-place="1"></select></label>
+        <label class="place p3"><span>3RD</span><select data-place="2"></select></label>
+        <label class="place"><span>4TH</span><select data-place="3"></select></label>
+        <label class="place"><span>5TH</span><select data-place="4"></select></label>
+        <button id="f-random" type="button" class="link">🎲 Random picks</button>
+      </fieldset>
+
+      <div class="field">Race length
+        <div class="seg" id="f-length">
+          <button type="button" data-v="sprint">200 M<small>~25 sec</small></button>
+          <button type="button" data-v="classic">400 M<small>~50 sec</small></button>
+          <button type="button" data-v="epic">800 M<small>~1:40 min</small></button>
+        </div>
+      </div>
+      <div class="field">Chaos level
+        <div class="seg" id="f-chaos">
+          <button type="button" data-v="calm">Calm<small>a few gags</small></button>
+          <button type="button" data-v="normal">Normal<small>fun</small></button>
+          <button type="button" data-v="chaos">Total chaos<small>bananas everywhere</small></button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btn-play" class="big">▶ Start race here</button>
+        <button id="btn-share" class="big alt">🔗 Create share link</button>
+      </div>
+      <p id="f-error" class="error" role="alert"></p>
+
+      <div id="share-box" hidden>
+        <div class="share-row">
+          <input id="share-url" readonly>
+          <button id="btn-copy" type="button">Copy</button>
+        </div>
+        <div class="share-row">
+          <a id="share-open" target="_blank" rel="noopener">Open link in new tab ↗</a>
+          <button id="btn-preview" type="button" class="link">▶ Watch this race here</button>
+        </div>
+        <p class="note">Everyone who opens this link watches the exact same race. Your picks are scrambled inside the link — nothing on the viewer's screen reveals them. Every new link is a brand-new race with different chaos (same winners).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Viewer landing -->
+  <section id="intro" class="overlay intro" hidden>
+    <div class="card intro-card">
+      <div id="i-sub" class="sub"></div>
+      <h1 id="i-title"></h1>
+      <p class="hype">Anyone can win. Anything can happen.</p>
+      <div id="i-list" class="runner-grid"></div>
+      <button id="btn-start" class="big">▶ START THE RACE</button>
+      <div class="intro-foot">
+        <button id="btn-sound-i" type="button" class="link"></button>
+        <button id="btn-back" type="button" class="link">✎ Back to setup</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="hud-buttons" hidden>
+    <button id="btn-sound" type="button" title="Sound on/off">🔊</button>
+    <button id="btn-exit" type="button" title="Back to setup">✕</button>
+  </div>
+
+  <div id="results-bar" hidden>
+    <button id="btn-replay" type="button">↻ Watch again</button>
+    <button id="btn-table" type="button">📋 Full results</button>
+    <button id="btn-new" type="button" class="admin-only">🎲 New race</button>
+    <button id="btn-edit" type="button" class="admin-only">✎ Edit</button>
+  </div>
+
+  <section id="table-modal" class="overlay" hidden>
+    <div class="card table-card">
+      <h2>Official results</h2>
+      <ol id="table-list"></ol>
+      <button id="btn-close-table" type="button" class="big">Close</button>
+    </div>
+  </section>
+
+  <div id="rotate-hint">↻ Turn your phone sideways for the best view</div>
+
+  <script src="js/planner.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

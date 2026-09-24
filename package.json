@@ -1,0 +1,10 @@
+{
+  "name": "pixel-dash",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pixel-art stadium race where the host secretly picks the top 5.",
+  "scripts": {
+    "test": "node test/planner.test.js 600",
+    "start": "python3 -m http.server 8000"
+  }
+}
