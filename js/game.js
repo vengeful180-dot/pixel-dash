@@ -113,6 +113,13 @@
     const gb = G.plan.globals.find((g) => g.type === 'blimp');
     G.blimp = gb ? Art.makeBlimp('GO ' + cfg.names[gb.seed % cfg.names.length] + '!') : null;
     G.rowY = cfg.names.map((_, i) => i);
+    G.dive = new Set();
+    const ord = G.plan.order;
+    for (let k = 0; k < Math.min(7, ord.length); k++) {
+      const c = G.plan.crossT[ord[k]];
+      const near = [ord[k - 1], ord[k + 1]].some((j) => j != null && Math.abs(G.plan.crossT[j] - c) < 0.12);
+      if (near) G.dive.add(ord[k]);
+    }
   }
 
   function buildLanes(N) {
@@ -497,6 +504,11 @@
       return res;
     }
     const cross = P.crossT[i];
+    if (G.dive && G.dive.has(i) && t > cross - 0.28 && t < cross + 0.55) {
+      if (t < cross + 0.1) { fixed('dive', () => Art.Pose.dive()); res.dy = -2; }
+      else fixed('fallen', () => Art.Pose.fallen());
+      return res;
+    }
     if (cross <= t) {
       if (st.v > 3.2) { run(); return res; }
       const place = P.order.indexOf(i);
@@ -588,6 +600,12 @@
         break;
       }
       case 'celebrate': {
+        // at the finale they stop dead and dance before the line
+        if (g.finale && u > 0.18 && u < 0.9) {
+          timed('cel', 8, (ph) => Art.Pose.celebrate(ph));
+          res.dy = -sn(Math.abs(Math.sin(t * 7)) * 5);
+          break;
+        }
         const [f, ph] = q((st.p / 2.5) * TAU, 16);
         res.key = 'rcel:' + f; res.make = () => Art.Pose.runCelebrate(ph);
         break;
@@ -620,6 +638,7 @@
         if (g.role === 'a') {
           if (u < 0.12) fixed('twind', () => Art.Pose.throwWind());
           else if (u < 0.3) fixed('trel', () => Art.Pose.throwRelease());
+          else if (g.laugh && u < 0.9) { const [f, ph] = q((st.p / 2.5) * TAU, 16); res.key = 'rcel:' + f; res.make = () => Art.Pose.runCelebrate(ph); }
           else run();
         } else if (u < Planner.DUO.throw.impact) run();
         else if (u < 0.8) timed('dazed', 8, (ph) => Art.Pose.dazed(ph));
@@ -647,6 +666,17 @@
       case 'highfive':
         if (u > 0.25 && u < 0.55) fixed('hi5', () => Art.Pose.highFive());
         else run(0.6);
+        break;
+      case 'tackle':
+        if (g.role === 'a' && u < 0.15) { fixed('dive', () => Art.Pose.dive()); res.dy = -3; }
+        else if (g.role === 'b' && u < 0.15) run();
+        else if (u < 0.8) fixed(g.role === 'a' ? 'fallen' : 'onback', () => (g.role === 'a' ? Art.Pose.fallen() : Art.Pose.onBack()));
+        else if (u < 0.9) fixed('kneel0', () => Art.Pose.kneel(0));
+        else run(0.45);
+        break;
+      case 'bow':
+        if (u < 0.15 || u > 0.88) run(0.45);
+        else fixed('bow', () => Art.Pose.bow());
         break;
       default: run(1.3);
     }
@@ -998,6 +1028,16 @@
           Art.drawText(w, word, sn(cx - 7), sn(cy - 20 - Math.abs(Math.sin(t * 5)) * 2), '#ffd23f', 1);
         }
         if (u > 0.58 && u < 1.12) drawReferee((ra.x + rb.x) / 2 + 24, Math.max(ra.gy, rb.gy) + 3, (u - 0.58) / 0.54, 'BREAK IT UP!');
+      } else if (g.type === 'tackle') {
+        if (u >= imp && !g._hit) { g._hit = true; puff((ra.x + rb.x) / 2 + cam, Math.max(ra.gy, rb.gy) - 3, 16, '#e8d9c4', 50, 16); }
+        if (u > imp && u < 0.8) {
+          for (const r of [ra, rb]) {
+            for (let k = 0; k < 3; k++) {
+              const a = t * 7 + (k * TAU) / 3;
+              w.drawImage(Art.P.star, sn(r.x + 9 * (r === ra ? 1 : -1) + Math.cos(a) * 7 - 2), sn(r.gy - 11 + Math.sin(a) * 2 - 2));
+            }
+          }
+        }
       } else if (g.type === 'highfive') {
         if (u >= imp && u < imp + 0.14) {
           const cx = (ra.x + rb.x) / 2 + 2, cy = Math.min(ra.gy, rb.gy) - 30;
@@ -1061,7 +1101,7 @@
     let target = (lead + last) / 2 - VW * 0.5;
     target = clamp(target, lead - VW * 0.72, lead - VW * 0.45);
     // during a gag, keep the action in the middle of the screen
-    if (G.camGag) target = gagFocus(G.camGag, G.raceT).x - VW * 0.5;
+    if (G.camCenter != null) target = G.camCenter - VW * 0.5;
     target = clamp(target, 0, FINISH_X() - VW * 0.62);
     G.camX = lerp(G.camX, target, 1 - Math.exp(-dt * 2.2));
   }
@@ -1163,10 +1203,77 @@
   const HOSTS = ['BOB', 'SUE'];
 
   // ================================================================ HUD
+  // Cinematic frame: vignette + letterbox bars, drawn over the world and under the HUD.
+  function renderCinema() {
+    const lb = G.lb || 0;
+    if (lb < 0.01) return;
+    const u = view.s, X0 = view.ox, Y0 = view.oy, WW = VW * u, HH = VH * u;
+    const g = sctx.createRadialGradient(X0 + WW / 2, Y0 + HH / 2, HH * 0.35, X0 + WW / 2, Y0 + HH / 2, WW * 0.62);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,' + (0.5 * lb).toFixed(3) + ')');
+    sctx.fillStyle = g;
+    sctx.fillRect(X0, Y0, WW, HH);
+    const bar = 30 * u * lb;
+    sctx.fillStyle = '#05060d';
+    sctx.fillRect(X0, Y0, WW, bar);
+    sctx.fillRect(X0, Y0 + HH - bar, WW, bar);
+  }
+
+  // Title card that slides in when the gag cam (or the finale) starts.
+  const CARD = {
+    trip: 'FACE PLANT!', banana: 'BANANA!', laces: 'LACE BREAK', selfie: 'SELFIE TIME', phone: 'INCOMING CALL', hotdog: 'SNACK BREAK',
+    cramp: 'CRAMP!', wrongway: 'WRONG WAY!', moonwalk: 'MOONWALK!', pigeon: 'BIRD ATTACK!', rain: 'PERSONAL STORM', autograph: 'FAN SERVICE',
+    flex: 'FLEX TIME', tired: 'OUT OF GAS', shoe: 'SHOE LOST!', ufo: 'ABDUCTION!', ufogood: 'ALIEN ASSIST', cartwheel: 'CARTWHEELS!',
+    wave: 'HI MOM!', celebrate: 'TOO EARLY!', energy: 'POWER UP!', dog: 'DOG CHASE!', bees: 'BEES!!!', sneeze: 'ACHOO!',
+    secondwind: 'SECOND WIND', rocket: 'ROCKET SHOES', scooter: 'E-SCOOTER!', pogo: 'POGO TIME', chickenhug: 'MASCOT HUG!', bow: 'TA-DA?!',
+    shove: 'PUSHY!', tripup: 'SNEAKY TRIP!', fight: 'FIGHT!', highfive: 'HIGH FIVE!', tackle: 'TACKLE!',
+    pie: 'PIE ATTACK!', balloon: 'WATER BOMB!', tomato: 'TOMATO!', chicken: 'CHICKEN STRIKE!',
+  };
+  function showCard(g, F) {
+    const nm = (i) => G.cfg.names[i];
+    let title, sub, hot = false;
+    if (F) {
+      hot = true;
+      title = F.kind === 'solo' ? CARD[F.type] : F.kind === 'throw' ? CARD[F.variant] : CARD[F.type];
+      sub = F.kind === 'solo' ? nm(F.target) + ' was about to win...' : nm(F.actor) + ' → ' + nm(F.target);
+    } else {
+      title = g.type === 'throw' ? CARD[g.variant] : CARD[g.type] || 'WHOA!';
+      if (!g.duo) sub = nm(g.i);
+      else if (g.type === 'fight') sub = nm(g.i) + ' vs ' + nm(g.other);
+      else if (g.type === 'highfive') sub = nm(g.i) + ' & ' + nm(g.other);
+      else sub = nm(g.i) + ' → ' + nm(g.other);
+    }
+    G.card = { title, sub, hot, at: G.now, out: null };
+  }
+  function renderCard() {
+    const c = G.card;
+    if (!c) return;
+    const u = view.s, X0 = view.ox, Y0 = view.oy;
+    const kin = smooth(0, 0.35, G.now - c.at);
+    const kout = c.out ? smooth(0, 0.3, G.now - c.out) : 0;
+    if (kout >= 1) { G.card = null; return; }
+    const ts = Math.max(12, 9 * u), ss = Math.max(10, 6.2 * u);
+    const wdt = Math.max(tw(c.title, ts, 700, true), tw(c.sub, ss, 700)) + 26 * u;
+    const hgt = 30 * u;
+    const x = X0 + 8 * u - (wdt + 20 * u) * (1 - kin) - (wdt + 20 * u) * kout;
+    const y = Y0 + 36 * u;
+    const accent = c.hot ? '#ff5a5f' : '#ffd23f';
+    pbox(x, y, wdt, hgt, Math.max(1, u), 'rgba(10,12,30,0.94)', accent);
+    sctx.fillStyle = accent;
+    sctx.fillRect(x, y, 4 * u, hgt);
+    txt(c.title, x + 10 * u, y + 10.5 * u, ts, accent, { weight: 700, title: true });
+    txt(c.sub, x + 10 * u, y + 22.5 * u, ss, '#ffffff', { weight: 700 });
+    if (G.timeScale < 0.8) {
+      const on = Math.floor(G.now * 3) % 2;
+      txt('● SLOW-MO', x + wdt - 6 * u, y - 5 * u, Math.max(9, 5.2 * u), on ? '#ff6b6b' : '#ffffff', { weight: 700, align: 'right', stroke: '#05060d', strokeW: 3 * u });
+    }
+  }
+
   function renderHUD(info, t) {
     const u = view.s;
     const P = G.plan;
     const X0 = view.ox, Y0 = view.oy, WW = VW * u;
+    if (G.mode === 'race') renderCinema();
     if (G.mode === 'race' || G.mode === 'marks') {
       // one slim bar: clock | live top 5 | meters to go
       const bh = 15 * u;
@@ -1249,15 +1356,9 @@
       }
       for (const b of G.extraBubbles) bubble(b.x, b.y, b.text);
 
-      // slow-motion tag while the gag cam is rolling
-      if (G.timeScale < 0.8 && G.camGag) {
-        const fsz = Math.max(10, 6 * u);
-        const lbl = '● SLOW-MO';
-        const lw = tw(lbl, fsz, 700) + 10 * u;
-        pbox(X0 + 8 * u, Y0 + 26 * u, lw, 11 * u, Math.max(1, u * 0.8), 'rgba(8,10,26,0.8)');
-        txt(lbl, X0 + 13 * u, Y0 + 31.5 * u, fsz, Math.floor(G.now * 3) % 2 ? '#ff6b6b' : '#ffffff', { weight: 700 });
-      }
     }
+
+    if (G.mode === 'race') renderCard();
 
     // commentary box
     if (G.line && (G.mode === 'race' || G.mode === 'marks' || G.mode === 'reveal')) {
@@ -1512,6 +1613,7 @@
     Sfx.musicStop();
     G.plan.gags.forEach((g) => { delete g._puffed; delete g._p; delete g._shoe; delete g._hit; delete g._park; delete g._dust; });
     G.sfxQ = []; G.camGag = null; G.focus = null; G.focusT = null;
+    G.card = null; G.finaleCard = false; G.zoomT = 1; G.zv = 0; G.lb = 0; G.lbT = 0; G.camCenter = null;
     const r = Planner.makeRng(G.plan.seed ^ 0xfa15e);
     const fsI = r.chance(0.3) ? r.int(0, G.plan.N - 1) : -1;
     const setDelay = r.range(0.9, 1.7);
@@ -1550,7 +1652,7 @@
       if (g.type === 'throw') {
         at(0.18, () => Sfx.whoosh());
         at(imp, () => (g.variant === 'balloon' ? Sfx.splash() : g.variant === 'chicken' ? Sfx.squeak() : Sfx.splat()));
-      } else if (g.type === 'shove' || g.type === 'tripup') at(imp, () => Sfx.thud());
+      } else if (g.type === 'shove' || g.type === 'tripup' || g.type === 'tackle') at(imp, () => Sfx.thud());
       else if (g.type === 'fight') {
         Sfx.pop();
         for (let u = 0.14; u < 0.8; u += 0.07 + ((u * 97) % 0.06)) at(u, () => Sfx.punch());
@@ -1568,7 +1670,7 @@
     const map = {
       trip: 'thud', banana: 'slip', laces: 'pop', selfie: 'click', phone: 'ring', hotdog: 'gulp', cramp: 'boing', wrongway: 'boing',
       moonwalk: 'pop', pigeon: 'quack', rain: 'whoosh', autograph: 'pop', flex: 'boing', shoe: 'boing', ufo: 'zap', ufogood: 'zap',
-      cartwheel: 'whoosh', wave: 'pop', celebrate: 'boing', energy: 'gulp', dog: 'bark', bees: 'buzz', sneeze: 'sneeze', secondwind: 'whoosh', rocket: 'whoosh',
+      cartwheel: 'whoosh', wave: 'pop', celebrate: 'boing', bow: 'pop', energy: 'gulp', dog: 'bark', bees: 'buzz', sneeze: 'sneeze', secondwind: 'whoosh', rocket: 'whoosh',
     };
     const s = map[g.type];
     if (s && Sfx[s]) Sfx[s]();
@@ -1578,18 +1680,30 @@
     const P = G.plan;
     // slow motion around the close finishes
     const T = G.raceT;
-    const slow = (T > P.T1 - 0.9 && T < P.T1 + 0.12) || (T > P.T5 - 0.45 && T < P.T5 + 0.2);
+    const F = P.finale;
+    // the finale: slow motion from the moment it goes wrong until the winner crosses
+    const slowFrom = F ? F.tg - 0.15 : P.T1 - 0.9;
+    const slow = (T > slowFrom && T < P.T1 + 0.12) || (T > P.T5 - 0.45 && T < P.T5 + 0.2);
     // gag cam: slow down and zoom in on whatever is happening
     const cg = camGag(T);
+    if (cg !== G.camGag && cg) { Sfx.whoosh(); showCard(cg); }
     G.camGag = cg;
     const gagSlow = cg && T > cg.t0 - 0.05 && T < cg.t0 + Math.min(cg.dur * 0.8, 2.4);
     G.timeScale = lerp(G.timeScale, slow ? 0.3 : gagSlow ? 0.5 : 1, 1 - Math.exp(-dt * 6));
     if (slow !== G.slowOn) { G.slowOn = slow; Sfx.musicMix(slow ? 0.6 : 1, slow); }
-    const finishZoom = T > P.T1 - 1.7 && T < P.T5 + 0.7;
+    const finaleShot = F && T > F.tg - 0.5 && T < F.tg + 0.9;
+    if (finaleShot && !G.finaleCard) { G.finaleCard = true; Sfx.whoosh(); showCard(null, F); }
+    const finishZoom = T > (F ? F.tg + 0.9 : P.T1 - 1.7) && T < P.T5 + 0.7;
     const gagZoom = cg && T < cg.t0 + cg.dur;
-    G.zoom = lerp(G.zoom, finishZoom ? 1.22 : gagZoom ? 1.3 : 1, 1 - Math.exp(-dt * 3));
-    if (finishZoom) G.focusT = { x: FINISH_X(), y: TRACK_TOP + G.lanes.trackH * 0.42 };
-    else if (cg) G.focusT = gagFocus(cg, T);
+    G.zoomT = finaleShot ? 1.42 : finishZoom ? 1.22 : gagZoom ? 1.32 : 1;
+    G.lbT = finaleShot || finishZoom || gagZoom ? 1 : 0;
+    G.camCenter = null;
+    if (finaleShot) {
+      G.focusT = gagFocus({ i: F.target, duo: F.kind !== 'solo', other: F.actor }, T);
+      G.camCenter = G.focusT.x;
+    } else if (finishZoom) G.focusT = { x: FINISH_X(), y: TRACK_TOP + G.lanes.trackH * 0.42 };
+    else if (cg) { G.focusT = gagFocus(cg, T); G.camCenter = G.focusT.x; }
+    if (G.card && !cg && !finaleShot && !G.card.out) G.card.out = G.now;
     const sdt = dt * G.timeScale;
     G.raceT += sdt;
     const t = G.raceT;
@@ -1656,11 +1770,20 @@
     let info = null;
     if (G.plan) {
       info = renderWorld(t);
-      // finish zoom crops the world canvas around the finish line
+      // camera moves on springs: the zoom punches in with a little overshoot, the aim glides
+      if (G.mode === 'race') {
+        const zt = G.zoomT || 1;
+        G.zv = (G.zv || 0) + (70 * (zt - G.zoom) - 11 * (G.zv || 0)) * dt;
+        G.zoom = Math.max(1, G.zoom + G.zv * dt);
+        G.lb = lerp(G.lb || 0, G.lbT || 0, 1 - Math.exp(-dt * 7));
+      } else { G.zoom = 1; G.zv = 0; G.lb = lerp(G.lb || 0, 0, 1 - Math.exp(-dt * 7)); }
       const z = G.zoom;
       if (G.focusT) {
-        const k = 1 - Math.exp(-dt * 5);
-        G.focus = G.focus ? { x: lerp(G.focus.x, G.focusT.x, k), y: lerp(G.focus.y, G.focusT.y, k) } : { x: G.focusT.x, y: G.focusT.y };
+        if (!G.focus) G.focus = { x: G.focusT.x, y: G.focusT.y, vx: 0, vy: 0 };
+        const f = G.focus;
+        f.vx += (45 * (G.focusT.x - f.x) - 13.4 * f.vx) * dt;
+        f.vy += (45 * (G.focusT.y - f.y) - 13.4 * f.vy) * dt;
+        f.x += f.vx * dt; f.y += f.vy * dt;
       }
       if (z > 1.01 && G.mode === 'race' && G.focus) {
         const cx = clamp(G.focus.x - G.camX, 0, VW), cy = G.focus.y;

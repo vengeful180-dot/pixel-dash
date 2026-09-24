@@ -437,6 +437,23 @@
       p.eyes = ph > Math.PI ? 'closed' : 'open';
       return p;
     },
+    bow() {
+      const p = base();
+      p.lean = 1.2;
+      p.arms = [[0.9, 1.3], [-1.3, 0.2]];
+      p.eyes = 'closed';
+      p.mouth = 'smile';
+      return p;
+    },
+    // superhero dive at the finish line
+    dive() {
+      const p = base();
+      p.arms = [[2.95, 0], [2.75, 0]];
+      p.legs = [[-0.15, 0.1], [-0.45, 0.35]];
+      p.rot = 1.25;
+      p.mouth = 'open';
+      return p;
+    },
     // ---- referee
     refCard() {
       const p = base();

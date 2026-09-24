@@ -117,6 +117,7 @@
     scooter:    { kind: 'good', dur: 2.8, speed: (u) => (u < 0.1 ? 0.6 : u < 0.62 ? 1.8 : u < 0.82 ? 0 : 0.45) },
     pogo:       { kind: 'bad',  dur: 2.2, speed: () => 0.62 },
     chickenhug: { kind: 'bad',  dur: 1.9, speed: (u) => (u < 0.2 ? 0.8 : u < 0.85 ? 0 : 0.4) },
+    bow:        { kind: 'late', dur: 2.0, speed: (u) => (u < 0.15 ? 0.4 : u < 0.88 ? 0 : 0.45) },
   };
   // stretch every gag a little so viewers can follow it
   for (const k in GAGS) GAGS[k].dur *= 1.25;
@@ -137,7 +138,13 @@
     fight:    { dur: 3.4, lanes: 1, gap: [-1.6, 1.6], impact: 0.12,
                 a: (u) => (u < 0.12 ? 0.5 : u < 0.84 ? 0 : 0.45), b: (u) => (u < 0.12 ? 0.5 : u < 0.84 ? 0 : 0.45) },
     highfive: { dur: 1.8, lanes: 1, gap: [-1.2, 1.2], impact: 0.4, a: () => 0.7, b: () => 0.7 },
+    tackle:   { dur: 2.6, lanes: 1, gap: [-1.5, 1.2], impact: 0.15,
+                a: (u) => (u < 0.15 ? 1.15 : u < 0.8 ? 0 : 0.4), b: (u) => (u < 0.15 ? 1 : u < 0.8 ? 0 : 0.4) },
   };
+  // The finale: whoever looks like the winner blows it a few meters before the line.
+  const FINALE_SOLO = ['trip', 'banana', 'celebrate', 'bow', 'selfie', 'cramp', 'shoe', 'phone'];
+  // caps the victim's speed so they really get passed
+  const finaleCap = (u) => (u < 0.15 ? 0.6 : u < 0.9 ? 0.1 : 0.45);
   const DUO_MAX = { calm: 1, normal: 3, chaos: 4 };
   const THROWABLES = ['pie', 'balloon', 'tomato', 'chicken'];
   const OBJ_NAME = { pie: 'cream pie', balloon: 'water balloon', tomato: 'tomato', chicken: 'rubber chicken' };
@@ -191,6 +198,23 @@
       pogo: ['{n} is on a POGO STICK!', '{n} switched to a pogo stick. Bold strategy.', 'Boing, boing, boing. That is {n}.'],
       chickenhug: ['The mascot is hugging {n}! It will NOT let go!', 'Mascot tackle on {n}! Is that even allowed?!', "{n} is getting the world's longest hug from the mascot."],
     },
+    finale: {
+      tease: ['{n} is going to win this!', 'Nobody can catch {n}! This is OVER!', '{n} has it in the bag!', 'It is {n}! {n} is about to win it!'],
+      teaseTwo: ['{n} and {m} are fighting for the win!', 'It is between {n} and {m}! Who wants it more?!'],
+      solo: {
+        trip: ['NOOO! {n} trips right before the line!'],
+        banana: ['A BANANA?! NOW?! {n} is DOWN!'],
+        celebrate: ['TOO EARLY, {n}! THE LINE IS RIGHT THERE!'],
+        bow: ['{n} stopped to take a BOW?! Before the line?!'],
+        selfie: ['A SELFIE?! {n}, THE FINISH LINE IS RIGHT THERE!'],
+        cramp: ['CRAMP! {n} is hopping... and everyone runs past!'],
+        shoe: ['{n} loses a shoe at the WORST possible moment!'],
+        phone: ['{n} is answering the phone?! NOW?!'],
+      },
+      throw: ['{m} throws a {obj} at {n}! And they BOTH blow it!', 'A {obj} from {m}! {n} is hit! Here come the others!'],
+      tackle: ['{m} TACKLES {n}! They both go down! Unbelievable!', 'NOOO! {m} dives on {n} and they both crash!'],
+      shove: ['{m} gives {n} a little push... and sneaks past! Cheeky!', 'Did {m} just shove {n}?! The judges are looking away!'],
+    },
     // two-runner gags: {a} starts it, {b} is on the receiving end, {obj} is what got thrown
     duo: {
       throw: ['{a} just threw a {obj} at {b}!', 'Direct hit! {a} gets {b} with a {obj}!', '{b} did NOT see that {obj} coming. Thanks, {a}.', 'Where did {a} even get a {obj}?!'],
@@ -198,6 +222,7 @@
       tripup: ['{a} sticks a leg out and {b} goes flying! Sneaky!', 'Did {a} just trip {b}?! I saw that!', '{a} is whistling innocently. {b} is on the floor.'],
       fight: ['A FIGHT! {a} and {b} are going at it!', '{a} and {b} stopped to settle their differences!', '{a} versus {b}! Somebody call the referee!'],
       highfive: ['{a} and {b} stop for a high five! Sportsmanship!', 'A high five between {a} and {b}! How wholesome!'],
+      tackle: ['{a} TACKLES {b}! This is athletics, not rugby!', '{a} dives at {b} and they both go down!', 'Flying tackle from {a}! {b} never saw it coming!'],
     },
     global: {
       crowdwave: ['The crowd is doing the wave!', 'A Mexican wave goes around the stadium!'],
@@ -396,9 +421,58 @@
     const oTa = new Float64Array(N);
     for (let i = 0; i < N; i++) oTa[i] = -(finishT[i] - T1) * vref - kick[i] * A;
 
+    // ---- finale: someone who looks like the winner blows it right before the line
+    let finale = null;
+    const finTrack = {}; // victim -> who they stay just ahead of, and by how much
+    const fpool = losers.filter((l) => l !== heartbreak);
+    if (!safe && fpool.length && rng.chance(0.9)) {
+      const pairs3 = [], pairs1 = [], cheeky = [];
+      for (const a of fpool) for (const b of fpool) {
+        if (a === b) continue;
+        if (Math.abs(a - b) <= 3) pairs3.push([a, b]);
+        if (Math.abs(a - b) === 1) pairs1.push([a, b]);
+      }
+      for (const w of W.slice(0, 2)) for (const l of fpool) if (Math.abs(w - l) === 1) cheeky.push([w, l]);
+      const opts = ['solo', 'solo', 'solo', 'solo'];
+      if (pairs3.length) opts.push('throw', 'throw');
+      if (pairs1.length) opts.push('tackle', 'tackle');
+      if (cheeky.length) opts.push('shove');
+      const kind = rng.pick(opts);
+      const tg = T1 - rng.range(1.0, 1.6);
+      if (kind === 'solo') {
+        const v = rng.pick(fpool);
+        finale = { kind, tg, victims: [v], target: v, type: rng.pick(FINALE_SOLO) };
+        finTrack[v] = { ref: -1, m: rng.range(1.0, 2.5) };
+      } else if (kind === 'throw') {
+        const [v, thrower] = rng.pick(pairs3);
+        finale = { kind, tg, victims: [v, thrower], target: v, actor: thrower, type: 'throw', variant: rng.pick(THROWABLES) };
+        finTrack[v] = { ref: -1, m: rng.range(4, 6) };
+        finTrack[thrower] = { ref: -1, m: rng.range(0.5, 1.5) };
+      } else if (kind === 'tackle') {
+        const [actor, v] = rng.pick(pairs1);
+        const m = rng.range(1.2, 2.2);
+        finale = { kind, tg, victims: [v, actor], target: v, actor, type: 'tackle' };
+        finTrack[v] = { ref: -1, m };
+        finTrack[actor] = { ref: -1, m: m - rng.range(0.3, 0.9) };
+      } else {
+        const [wn, v] = rng.pick(cheeky);
+        finale = { kind, tg, victims: [v], target: v, actor: wn, type: 'shove' };
+        finTrack[v] = { ref: wn, m: rng.range(0.3, 0.9) };
+      }
+      // already in the right order when the final stretch begins
+      const base = rng.range(1.5, 3.5);
+      for (const v of finale.victims) {
+        role[v] = 'fake';
+        finishT[v] = Math.max(finishT[v], T5 + rng.range(0.3, 1.0));
+        kick[v] = 0;
+        const tr0 = finTrack[v];
+        oTa[v] = (tr0.ref >= 0 ? oTa[tr0.ref] : base) + tr0.m;
+      }
+    }
+
     // ---- storyline keyframes (offset from the reference runner, meters)
     const FR = [0.06, 0.15, 0.27, 0.40, 0.52, 0.64, 0.75, 0.84];
-    const SP = [1.2, 3.5, 6.5, 8.5, 9.5, 9.5, 8.5, 7];
+    const SP = [5, 8.5, 10, 10.5, 10.5, 10, 9, 7.5];
     const fa = ta / T1;
     const n = (a) => rng.range(-a, a);
     const ZF = {
@@ -432,7 +506,9 @@
     const gags = [];
     const globals = [];
     const react = new Float64Array(N);
-    for (let i = 0; i < N; i++) react[i] = 0.1 + rng.range(0, 0.16);
+    // different reactions and acceleration spread the field out quickly after the gun
+    const accel = new Float64Array(N);
+    for (let i = 0; i < N; i++) { react[i] = 0.08 + rng.range(0, 0.4); accel[i] = ACC * rng.range(0.75, 1.2); }
     const byRunner = [...Array(N)].map(() => []);
     const free = (i, t0, dur, margin) => byRunner[i].every((g) => t0 + dur + margin < g.t0 || t0 > g.t0 + g.dur + margin);
     // keep each runner's list sorted (gags are also added while the race is being simulated)
@@ -461,6 +537,21 @@
     const clear = (t0, dur) => gags.every((g) => t0 + dur + GAG_GAP < g.t0 || t0 > g.t0 + g.dur + GAG_GAP)
       && globals.every((g) => t0 + dur + 1 < g.t0 || t0 > g.t0 + 2.5);
 
+    if (finale) {
+      const f = finale, tg = f.tg;
+      const capped = (fn) => (u) => Math.min(fn(u), finaleCap(u));
+      if (f.kind === 'solo') {
+        insertGag({ i: f.target, type: f.type, t0: tg, dur: GAGS[f.type].dur, finale: true, speedFn: capped(GAGS[f.type].speed) });
+      } else {
+        const D2 = DUO[f.type];
+        const aFn = f.kind === 'throw' ? (u) => (u < 0.22 ? 0.55 : u < 0.9 ? 0.2 : 0.45) : capped(D2.a);
+        insertGag({ i: f.actor, type: f.type, t0: tg, dur: D2.dur, duo: true, role: 'a', other: f.target, variant: f.variant, finale: true,
+          cosmetic: f.kind === 'shove', speedFn: aFn, laugh: f.kind === 'throw' });
+        insertGag({ i: f.target, type: f.type, t0: tg, dur: D2.dur, duo: true, role: 'b', other: f.actor, variant: f.variant, finale: true,
+          speedFn: capped(D2.b) });
+      }
+      typeUse[f.type] = (typeUse[f.type] || 0) + 1;
+    }
     const slotTimes = [];
     if (!safe) {
       // someone sleeps through the gun
@@ -478,24 +569,24 @@
         return null;
       };
       // one fading favourite blows it at the end (placed first: it's the finale)
-      const fakes = losers.filter((l) => role[l] === 'fake' && l !== heartbreak);
+      const fakes = losers.filter((l) => role[l] === 'fake' && l !== heartbreak && !finTrack[l]);
       if (fakes.length && rng.chance(0.8)) {
-        tryPlace(rng.pick(fakes), pickType(LATE_FADE), ta - 0.8, ta + Math.min(1.2, A - 1.4), 0.8);
+        tryPlace(rng.pick(fakes), pickType(LATE_FADE), ta - 4, ta - 1, 0.8);
       }
       // comeback winners start with a disaster
       for (const w of W) {
         if (role[w] !== 'comeback') continue;
         const type = pickType(EARLY_DISASTER);
-        tryPlace(w, type, 2.5, Math.min(0.35 * T1, winnerBadCutoff - GAGS[type].dur));
+        tryPlace(w, type, 5.5, Math.min(0.35 * T1, winnerBadCutoff - GAGS[type].dur));
       }
       // early bolters get a boost
       for (const l of losers) {
         if (role[l] !== 'bolter' || !rng.chance(0.6)) continue;
-        tryPlace(l, pickType(GOOD), 2.5, 0.25 * T1);
+        if (!finTrack[l]) tryPlace(l, pickType(GOOD), 4.5, 0.25 * T1);
       }
       // the rest is decided during the simulation, when we know who is next to whom
       const gap = CHAOS_GAP[cfg.chaos] || CHAOS_GAP.normal;
-      for (let ts = rng.range(1.8, 3.2); ts < ta - 1.0; ts += gap * rng.range(0.6, 1.4)) slotTimes.push(ts);
+      for (let ts = rng.range(5.5, 7); ts < ta - 1.0; ts += gap * rng.range(0.6, 1.4)) slotTimes.push(ts);
     }
 
     const gagCount = new Array(N).fill(0);
@@ -506,6 +597,7 @@
     const duoOk = (i, role, type, ts) => {
       const D2 = DUO[type];
       if (ts > finishT[i] - 3) return false;
+      if (finTrack[i] && ts > ta - 12) return false;
       if (!exact[i]) return true;
       const hurts = type === 'fight' || (role === 'b' && type !== 'highfive');
       return ts + D2.dur <= (hurts ? winnerBadCutoff : winnerGoodCutoff);
@@ -548,13 +640,14 @@
           return;
         }
       }
-      if (duoCount < duoMax && ts > 4 && rng.chance(0.6) && tryDuo(ts, p)) { duoCount++; return; }
+      if (duoCount < duoMax && ts > 6 && rng.chance(0.6) && tryDuo(ts, p)) { duoCount++; return; }
       const kind = rng.chance(0.62) ? 'bad' : 'good';
       const type = pickType(kind === 'bad' ? BAD : GOOD);
       const dur = GAGS[type].dur;
       const cands = [];
       for (let i = 0; i < N; i++) {
         if (!clear(ts, dur) || !free(i, ts, dur, 2.5)) continue;
+        if (finTrack[i] && ts > ta - 12) continue;
         if (exact[i]) {
           if (kind === 'bad' && ts + dur > winnerBadCutoff) continue;
           if (kind === 'good' && ts + dur > winnerGoodCutoff) continue;
@@ -572,7 +665,7 @@
         typeUse[type]--;
       }
     };
-    const gagSpeed = (g, u) => (g.duo ? DUO[g.type][g.role](u) : GAGS[g.type].speed(u));
+    const gagSpeed = (g, u) => (g.speedFn ? g.speedFn(u) : g.duo ? DUO[g.type][g.role](u) : GAGS[g.type].speed(u));
 
     // ---- simulate
     const tEndTarget = Math.max(...finishT) + 4;
@@ -588,12 +681,24 @@
       const t = k * DT;
       while (si < slotTimes.length && slotTimes[si] <= t) decideSlot(slotTimes[si++], p);
       const rv = ref.v(t), rp = ref.p(t);
+      // the finale victims stay just ahead of the chasers until it goes wrong
+      let leadP = -1e9, leadV = 0;
+      if (finale && t >= ta && t < finale.tg) {
+        for (let j = 0; j < N; j++) if (!finTrack[j] && p[j] > leadP) { leadP = p[j]; leadV = v[j]; }
+        for (const j in finTrack) {
+          const tr = finTrack[j];
+          tr.rp = tr.ref >= 0 ? p[tr.ref] : leadP;
+          tr.rv = tr.ref >= 0 ? v[tr.ref] : leadV;
+        }
+      }
       for (let i = 0; i < N; i++) {
         pos[i * K + k] = p[i];
         const list = byRunner[i];
         while (gp[i] < list.length && t >= list[gp[i]].t0 + list[gp[i]].dur) gp[i]++;
-        const g = gp[i] < list.length && t >= list[gp[i]].t0 ? list[gp[i]] : null;
-        let target, up = ACC, down = 10, direct = false;
+        let g = gp[i] < list.length && t >= list[gp[i]].t0 ? list[gp[i]] : null;
+        if (g && g.cosmetic) g = null; // only changes the pose, not the pace
+        const tr = finTrack[i];
+        let target, up = accel[i], down = 10, direct = false;
         if (crossT[i] >= 0) {
           const left = D + 14 - p[i];
           target = left > 0 ? Math.min(v[i], Math.sqrt(2 * 3.5 * left)) : 0;
@@ -604,6 +709,11 @@
           const u = (t - g.t0) / g.dur;
           target = gagSpeed(g, u) * Math.max(rv, vref * 0.5);
           up = 30; down = 40;
+        } else if (tr && t >= ta && t < finale.tg) {
+          if (tr.m0 == null) tr.m0 = p[i] - tr.rp;
+          const m = lerp(tr.m0, tr.m, smoothstep(ta, finale.tg - 0.4, t));
+          target = clamp(tr.rv + 2.5 * (tr.rp + m - p[i]), 0.5 * rv, 1.45 * rv);
+          up = 12;
         } else if (t >= ta) {
           const rem = finishT[i] - t;
           if (exact[i]) {
@@ -622,7 +732,9 @@
         }
         if (direct) v[i] = target;
         else v[i] += clamp(target - v[i], -down * DT, up * DT);
-        if (!isW[i] && crossT[i] < 0 && t < T5 + EPS) {
+        // no loser may reach the line before 5th place; the finale victims are exempt
+        // only until their mishap starts (it stops them well before the line)
+        if (!isW[i] && crossT[i] < 0 && t < T5 + EPS && !(tr && t < finale.tg)) {
           v[i] = Math.min(v[i], (D - p[i]) / Math.max(T5 + EPS - t, 1e-6));
         }
         const np = p[i] + v[i] * DT;
@@ -668,11 +780,18 @@
     let score = leadChanges.length * 1.0 + distinct * 1.5;
     if (N >= 7) score += (5 - ov50) * 1.2 + (5 - ov75) * 1.5 + (5 - ov90) * 0.8;
     if (lead75 !== W[0]) score += 1.5;
+    if (finale) {
+      const kg = Math.round(finale.tg / DT);
+      let best = -1;
+      for (let i = 0; i < N; i++) if (best < 0 || pos[i * K + kg] > pos[best * K + kg]) best = i;
+      finale.ledAtTg = finale.victims.includes(best);
+      if (finale.ledAtTg) score += 4;
+    }
     if (leadChanges.length > 14) score -= (leadChanges.length - 14) * 1.5;
     const good = leadChanges.length >= (T1 < 30 ? 2 : 3) && distinct >= 3 && (N < 8 || (ov50 <= 3 && ov75 <= 3));
 
     return {
-      seed, N, D, vref, dt: DT, ticks: K, pos, crossT, finishT, T1, T5, ta,
+      seed, N, D, vref, dt: DT, ticks: K, pos, crossT, finishT, T1, T5, ta, finale,
       react, gags, globals, role, scenario, leadChanges, score, good, winners: W, isW,
     };
   }
@@ -698,7 +817,16 @@
 
     const ev = [];
     ev.push({ t: 0.15, prio: 6, lines: [pickLine(TXT.start)] });
+    const F = plan.finale;
+    if (F) {
+      const two = F.kind === 'throw' || F.kind === 'tackle';
+      const tease = two ? fill(pickLine(TXT.finale.teaseTwo), { n: nm(F.target), m: nm(F.actor) }) : fill(pickLine(TXT.finale.tease), { n: nm(F.target) });
+      ev.push({ t: F.tg - 3.2, prio: 8, lines: [tease] });
+      const pool = F.kind === 'solo' ? TXT.finale.solo[F.type] : TXT.finale[F.kind];
+      ev.push({ t: F.tg + 0.1, prio: 9, lines: [fill(pickLine(pool), { n: nm(F.target), m: nm(F.actor), obj: OBJ_NAME[F.variant] || '' })] });
+    }
     for (const g of plan.gags) {
+      if (g.finale) continue;
       if (g.duo) {
         if (g.role !== 'a') continue;
         const line = fill(pickLine(TXT.duo[g.type]), { a: nm(g.i), b: nm(g.other), obj: OBJ_NAME[g.variant] || 'shoe' });
@@ -785,7 +913,7 @@
       energy: ['GLUG GLUG', 'POWER UP!'], dog: ['AAAAAH!', 'GOOD BOY?!', 'NOT THE DOG!'], bees: ['BEES!!', 'NOT THE BEES!'],
       sneeze: ['ACHOO!'], secondwind: ['NOT TODAY!', 'SECOND WIND!', 'I BELIEVE!'], rocket: ['WHOA-OA-OA!', 'TOO FAST!'],
       ufogood: ['THANKS, ALIENS!', 'BEAM ME UP!'], scooter: ['WHEEE!', 'ZOOOM!', 'BEEP BEEP!'],
-      pogo: ['BOING BOING!', 'WEEE!'], chickenhug: ['LET ME GO!', 'HELP!', 'TOO TIGHT!'],
+      pogo: ['BOING BOING!', 'WEEE!'], chickenhug: ['LET ME GO!', 'HELP!', 'TOO TIGHT!'], bow: ['TA-DA!', 'THANK YOU!'],
     };
     // duo bubbles: [who, when (0..1 through the gag), lines]
     const HIT = { pie: 'SPLAT!', balloon: 'SPLOOSH!', tomato: 'SQUISH!', chicken: 'BONK!' };
@@ -795,6 +923,7 @@
       tripup: [['b', 0.24, ['WHOAAA!', 'AAAH!']], ['a', 0.5, ['OOPS...', '*WHISTLES*', 'WASN\'T ME!']]],
       fight: [['a', 0, ['YOU WANNA GO?!', 'COME HERE!']], ['b', 0.2, ['BRING IT!', 'OH YEAH?!']]],
       highfive: [['a', 0, ['UP TOP!']], ['b', 0.25, ['YEAH!', 'NICE!']]],
+      tackle: [['a', 0, ['NOT SO FAST!', 'GET BACK HERE!']], ['b', 0.2, ['NOOO!', 'OOF!']]],
     };
     plan.bubbles = [];
     for (const g of plan.gags) {
@@ -802,8 +931,11 @@
         for (const [who, at, lines] of DUO_BUB[g.type]) {
           if (who !== g.role) continue;
           const t0 = g.t0 + at * g.dur;
-          plan.bubbles.push({ i: g.i, t0, t1: t0 + 1.6, text: lines ? rng.pick(lines) : HIT[g.variant] });
+          let text = lines ? rng.pick(lines) : HIT[g.variant];
+          if (g.cosmetic) text = 'OOPS!';
+          plan.bubbles.push({ i: g.i, t0, t1: t0 + 1.6, text });
         }
+        if (g.laugh) plan.bubbles.push({ i: g.i, t0: g.t0 + 0.4 * g.dur, t1: g.t0 + 0.4 * g.dur + 1.4, text: 'HA HA!' });
         continue;
       }
       plan.bubbles.push({ i: g.i, t0: g.t0 + 0.05, t1: g.t0 + Math.min(g.dur, 3) + 0.3, text: rng.pick(BUB[g.type] || ['!?']) });
