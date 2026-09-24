@@ -141,6 +141,12 @@
     tackle:   { dur: 2.6, lanes: 1, gap: [-1.5, 1.2], impact: 0.15,
                 a: (u) => (u < 0.15 ? 1.15 : u < 0.8 ? 0 : 0.4), b: (u) => (u < 0.15 ? 1 : u < 0.8 ? 0 : 0.4) },
   };
+  // The bazooka: someone further back fires into the front of the pack; everyone near the blast goes flying.
+  const BAZOOKA = {
+    dur: 4.2, fire: 0.16, impact: 0.3,
+    shooter: (u) => (u < 0.3 ? 0 : u < 0.4 ? -0.35 : u < 0.82 ? 0 : 0.45),
+    victim: (u) => (u < 0.3 ? 1 : u < 0.84 ? 0 : 0.45),
+  };
   // The finale: whoever looks like the winner blows it a few meters before the line.
   const FINALE_SOLO = ['trip', 'banana', 'celebrate', 'bow', 'selfie', 'cramp', 'shoe', 'phone'];
   // caps the victim's speed so they really get passed
@@ -197,6 +203,10 @@
       scooter: ['{n} found an ELECTRIC SCOOTER!', 'Is {n} allowed to use a scooter?! Referee?!', '{n} hopped on a rental scooter. Hope they paid for it.'],
       pogo: ['{n} is on a POGO STICK!', '{n} switched to a pogo stick. Bold strategy.', 'Boing, boing, boing. That is {n}.'],
       chickenhug: ['The mascot is hugging {n}! It will NOT let go!', 'Mascot tackle on {n}! Is that even allowed?!', "{n} is getting the world's longest hug from the mascot."],
+    },
+    bazooka: {
+      fire: ['{n} has a BAZOOKA?! Where did they even GET that?!', 'Is that a BAZOOKA, {n}?! This is a running race!', '{n} pulls out a BAZOOKA! Everybody DUCK!'],
+      after: ['KA-BOOM! Nobody is hurt... just their pride!', 'Direct hit on the front of the pack! Everybody is okay, just a bit crispy!', 'That will buff right out! Everybody back on your feet!'],
     },
     finale: {
       tease: ['{n} is going to win this!', 'Nobody can catch {n}! This is OVER!', '{n} has it in the bag!', 'It is {n}! {n} is about to win it!'],
@@ -534,8 +544,22 @@
     const winnerBadCutoff = ta - 8;
     const winnerGoodCutoff = ta - 5;
     // only one thing happens at a time
+    const reserved = [];
     const clear = (t0, dur) => gags.every((g) => t0 + dur + GAG_GAP < g.t0 || t0 > g.t0 + g.dur + GAG_GAP)
-      && globals.every((g) => t0 + dur + 1 < g.t0 || t0 > g.t0 + 2.5);
+      && globals.every((g) => t0 + dur + 1 < g.t0 || t0 > g.t0 + 2.5)
+      && reserved.every((r) => t0 + dur + GAG_GAP < r.a || t0 > r.b + GAG_GAP);
+
+    // the bazooka gets a reserved window; it fires at the first moment the front of the pack is a good target
+    const bzChance = cfg.bazooka === 'always' ? 1 : cfg.bazooka === 'off' ? 0 : 0.5;
+    let bazooka = null, bzWindow = null;
+    if (!safe && rng.chance(bzChance)) {
+      const lo = Math.max(9, 0.28 * T1), hi = Math.min(0.7 * T1, winnerBadCutoff - BAZOOKA.dur - 3);
+      if (hi > lo) {
+        const tb = rng.range(lo, hi);
+        bzWindow = { a: tb, b: tb + BAZOOKA.dur + 3 };
+        reserved.push(bzWindow);
+      }
+    }
 
     if (finale) {
       const f = finale, tg = f.tg;
@@ -597,18 +621,27 @@
     const duoOk = (i, role, type, ts) => {
       const D2 = DUO[type];
       if (ts > finishT[i] - 3) return false;
-      if (finTrack[i] && ts > ta - 12) return false;
+      if (finTrack[i] && ts > ta - 16) return false;
       if (!exact[i]) return true;
       const hurts = type === 'fight' || (role === 'b' && type !== 'highfive');
       return ts + D2.dur <= (hurts ? winnerBadCutoff : winnerGoodCutoff);
     };
     // p = everyone's position right now
+    // 0 = leader ... 1 = last; the front of the race gets most of the action
+    const rankNow = (p) => {
+      const order = [...Array(N).keys()].sort((a, b) => p[b] - p[a]);
+      const r = new Float64Array(N);
+      order.forEach((i, k) => { r[i] = N > 1 ? k / (N - 1) : 0; });
+      return r;
+    };
+    const frontW = (r) => (r < 0.34 ? 14 : r < 0.67 ? 1.2 : 0.35);
     const tryDuo = (ts, p) => {
-      const types = rng.shuffle(Object.keys(DUO)).sort((x, y) => (typeUse[x] || 0) - (typeUse[y] || 0));
-      for (const type of types) {
+      // every (type, pair) that fits right now; front pairs and fresh gag types are preferred
+      const rk = rankNow(p);
+      const cands = [];
+      for (const type of Object.keys(DUO)) {
         const D2 = DUO[type];
         if (!clear(ts, D2.dur)) continue;
-        const pairs = [];
         for (let a = 0; a < N; a++) {
           for (let b = 0; b < N; b++) {
             if (a === b || Math.abs(a - b) > D2.lanes) continue;
@@ -616,19 +649,20 @@
             if (d < D2.gap[0] || d > D2.gap[1]) continue;
             if (!free(a, ts, D2.dur, 2.5) || !free(b, ts, D2.dur, 2.5)) continue;
             if (!duoOk(a, 'a', type, ts) || !duoOk(b, 'b', type, ts)) continue;
-            pairs.push([a, b]);
+            cands.push({ type, a, b });
           }
         }
-        if (!pairs.length) continue;
-        const [a, b] = rng.weighted(pairs, (pr) => 1 / (1 + gagCount[pr[0]] + gagCount[pr[1]]));
-        const variant = type === 'throw' ? rng.pick(THROWABLES) : null;
-        insertGag({ i: a, type, t0: ts, dur: D2.dur, duo: true, role: 'a', other: b, variant });
-        insertGag({ i: b, type, t0: ts, dur: D2.dur, duo: true, role: 'b', other: a, variant });
-        gagCount[a]++; gagCount[b]++;
-        typeUse[type] = (typeUse[type] || 0) + 1;
-        return true;
       }
-      return false;
+      if (!cands.length) return false;
+      const { type, a, b } = rng.weighted(cands, (c) => frontW(Math.min(rk[c.a], rk[c.b]))
+        / (1 + gagCount[c.a] + gagCount[c.b]) / Math.pow(1 + (typeUse[c.type] || 0), 2));
+      const D2 = DUO[type];
+      const variant = type === 'throw' ? rng.pick(THROWABLES) : null;
+      insertGag({ i: a, type, t0: ts, dur: D2.dur, duo: true, role: 'a', other: b, variant });
+      insertGag({ i: b, type, t0: ts, dur: D2.dur, duo: true, role: 'b', other: a, variant });
+      gagCount[a]++; gagCount[b]++;
+      typeUse[type] = (typeUse[type] || 0) + 1;
+      return true;
     };
     const decideSlot = (ts, p) => {
       if (!clear(ts, 1.2)) return;
@@ -647,7 +681,7 @@
       const cands = [];
       for (let i = 0; i < N; i++) {
         if (!clear(ts, dur) || !free(i, ts, dur, 2.5)) continue;
-        if (finTrack[i] && ts > ta - 12) continue;
+        if (finTrack[i] && ts > ta - 16) continue;
         if (exact[i]) {
           if (kind === 'bad' && ts + dur > winnerBadCutoff) continue;
           if (kind === 'good' && ts + dur > winnerGoodCutoff) continue;
@@ -658,7 +692,8 @@
         cands.push(i);
       }
       if (cands.length) {
-        const i = rng.weighted(cands, (c) => 1 / Math.pow(1 + gagCount[c], 2));
+        const rk = rankNow(p);
+        const i = rng.weighted(cands, (c) => frontW(rk[c]) / Math.pow(1 + gagCount[c], 1.5));
         addGag(i, type, ts);
         gagCount[i]++;
       } else {
@@ -666,6 +701,37 @@
       }
     };
     const gagSpeed = (g, u) => (g.speedFn ? g.speedFn(u) : g.duo ? DUO[g.type][g.role](u) : GAGS[g.type].speed(u));
+
+    // fire the bazooka at the front of the pack; p = positions right now
+    const tryBazooka = (ts, p, need) => {
+      const dur = BAZOOKA.dur;
+      const order = [...Array(N).keys()].sort((a, b) => p[b] - p[a]);
+      const late = (j) => finTrack[j] || (exact[j] && ts + dur > winnerBadCutoff) || !free(j, ts, dur, 1);
+      // aim where the front of the pack is most crowded
+      const aims = order.slice(0, 5).map((aim) => {
+        const cx = p[aim] + 0.4;
+        return { aim, cx, victims: [...Array(N).keys()].filter((j) => Math.abs(p[j] - cx) < 4.6 && Math.abs(j - aim) <= 3) };
+      }).sort((x, y) => y.victims.length - x.victims.length);
+      for (const { aim, cx, victims } of aims) {
+        if (victims.length < need || victims.some(late)) continue;
+        const shooters = [...Array(N).keys()].filter((j) => !victims.includes(j) && p[j] < cx - 6 && p[j] > cx - 22 && !late(j));
+        // nobody behind to pull the trigger? a fan in the stands does it
+        if (!shooters.length && need > 1) continue;
+        const sh = shooters.length ? rng.pick(shooters) : -1;
+        if (sh >= 0) insertGag({ i: sh, type: 'bazooka', t0: ts, dur, role: 'shooter', aim, victims, speedFn: BAZOOKA.shooter });
+        for (const j of victims) {
+          insertGag({ i: j, type: 'blast', t0: ts, dur, role: 'victim', shooter: sh, aim, dir: j === aim ? (rng.chance(0.5) ? 1 : -1) : Math.sign(p[j] - cx) || 1,
+            height: rng.range(20, 38), speedFn: BAZOOKA.victim });
+          gagCount[j]++;
+        }
+        if (sh >= 0) gagCount[sh]++;
+        bazooka = { t0: ts, shooter: sh, aim, victims, fanX: cx - 7 };
+        // with a fan shooting there is no shooter entry; the aim runner's entry carries the gag cam
+        if (sh < 0) gags.find((g) => g.type === 'blast' && g.i === aim && g.t0 === ts).fan = true;
+        return true;
+      }
+      return false;
+    };
 
     // ---- simulate
     const tEndTarget = Math.max(...finishT) + 4;
@@ -680,6 +746,13 @@
     for (let k = 0; k < K; k++) {
       const t = k * DT;
       while (si < slotTimes.length && slotTimes[si] <= t) decideSlot(slotTimes[si++], p);
+      if (bzWindow && !bazooka && t >= bzWindow.a && k % 15 === 0) {
+        // hold fire for a crowd of 3+, settle for fewer as the window runs out
+        const waited = t - bzWindow.a;
+        const need = waited < 1.8 ? 3 : waited < 2.6 ? 2 : 1;
+        if (t > bzWindow.b - BAZOOKA.dur) { reserved.splice(reserved.indexOf(bzWindow), 1); bzWindow = null; }
+        else if (tryBazooka(t, p, need)) { reserved.splice(reserved.indexOf(bzWindow), 1); bzWindow = null; }
+      }
       const rv = ref.v(t), rp = ref.p(t);
       // the finale victims stay just ahead of the chasers until it goes wrong
       let leadP = -1e9, leadV = 0;
@@ -744,6 +817,7 @@
     }
     gags.sort((x, y) => x.t0 - y.t0 || (x.role === 'b') - (y.role === 'b'));
     for (let i = 0; i < N; i++) if (crossT[i] < 0) valid = false;
+    if (cfg.bazooka === 'always' && !safe && !bazooka) valid = false;
 
     // ---- verify the result
     for (let j = 0; j < 5 && valid; j++) {
@@ -791,7 +865,7 @@
     const good = leadChanges.length >= (T1 < 30 ? 2 : 3) && distinct >= 3 && (N < 8 || (ov50 <= 3 && ov75 <= 3));
 
     return {
-      seed, N, D, vref, dt: DT, ticks: K, pos, crossT, finishT, T1, T5, ta, finale,
+      seed, N, D, vref, dt: DT, ticks: K, pos, crossT, finishT, T1, T5, ta, finale, bazooka,
       react, gags, globals, role, scenario, leadChanges, score, good, winners: W, isW,
     };
   }
@@ -825,8 +899,14 @@
       const pool = F.kind === 'solo' ? TXT.finale.solo[F.type] : TXT.finale[F.kind];
       ev.push({ t: F.tg + 0.1, prio: 9, lines: [fill(pickLine(pool), { n: nm(F.target), m: nm(F.actor), obj: OBJ_NAME[F.variant] || '' })] });
     }
+    const B = plan.bazooka;
+    if (B) {
+      const bd = BAZOOKA.dur;
+      ev.push({ t: B.t0 + 0.1, prio: 6.5, lines: [B.shooter >= 0 ? fill(pickLine(TXT.bazooka.fire), { n: nm(B.shooter) }) : 'A FAN IN THE STANDS HAS A BAZOOKA?! Security!'] });
+      ev.push({ t: B.t0 + BAZOOKA.impact * bd + 0.9, prio: 6.4, lines: [pickLine(TXT.bazooka.after)] });
+    }
     for (const g of plan.gags) {
-      if (g.finale) continue;
+      if (g.finale || g.type === 'bazooka' || g.type === 'blast') continue;
       if (g.duo) {
         if (g.role !== 'a') continue;
         const line = fill(pickLine(TXT.duo[g.type]), { a: nm(g.i), b: nm(g.other), obj: OBJ_NAME[g.variant] || 'shoe' });
@@ -926,7 +1006,19 @@
       tackle: [['a', 0, ['NOT SO FAST!', 'GET BACK HERE!']], ['b', 0.2, ['NOOO!', 'OOF!']]],
     };
     plan.bubbles = [];
+    const OUCH = rng.shuffle(['OUCH!', '#$%&!', 'MY HAIR!', 'WHAT WAS THAT?!', 'I CAN SEE SOUNDS', 'MOMMY!', 'CRISPY...', 'WHO DID THAT?!']);
+    let oi = 0;
     for (const g of plan.gags) {
+      if (g.type === 'bazooka') {
+        plan.bubbles.push({ i: g.i, t0: g.t0 + 0.05, t1: g.t0 + BAZOOKA.fire * g.dur + 0.1, text: rng.pick(['FIRE IN THE HOLE!', 'SURPRISE!', 'SAY CHEESE!']) });
+        plan.bubbles.push({ i: g.i, t0: g.t0 + 0.5 * g.dur, t1: g.t0 + 0.5 * g.dur + 1.4, text: 'WORTH IT.' });
+        continue;
+      }
+      if (g.type === 'blast') {
+        const t0 = g.t0 + 0.64 * g.dur;
+        plan.bubbles.push({ i: g.i, t0, t1: t0 + 1.3, text: OUCH[oi++ % OUCH.length] });
+        continue;
+      }
       if (g.duo) {
         for (const [who, at, lines] of DUO_BUB[g.type]) {
           if (who !== g.role) continue;
@@ -982,7 +1074,7 @@
     return best;
   }
 
-  const Planner = { planRace, makeRng, hashStr, LENGTHS, GAGS, DUO, GLOBALS, TXT, DT, fill };
+  const Planner = { planRace, makeRng, hashStr, LENGTHS, GAGS, DUO, BAZOOKA, GLOBALS, TXT, DT, fill };
   if (typeof module !== 'undefined' && module.exports) module.exports = Planner;
   else root.Planner = Planner;
 })(typeof self !== 'undefined' ? self : this);

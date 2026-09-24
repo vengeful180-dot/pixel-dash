@@ -12,12 +12,12 @@ const chaos = ['calm', 'normal', 'chaos'];
 let fails = 0, good = 0, totalLead = 0, w1LedAt75 = 0, top5Was = 0;
 let slowest = 0;
 const gap56 = [];
-let duoTotal = 0;
+let duoTotal = 0, bazookas = 0;
 for (let r = 0; r < RACES; r++) {
   const N = rng.int(5, 20);
   const names = [...Array(N)].map((_, i) => 'Runner ' + (i + 1));
   const winners = rng.shuffle([...Array(N).keys()]).slice(0, 5);
-  const cfg = { names, winners, length: rng.pick(lengths), chaos: rng.pick(chaos), seed: rng.int(0, 2 ** 31) };
+  const cfg = { names, winners, length: rng.pick(lengths), chaos: rng.pick(chaos), seed: rng.int(0, 2 ** 31), bazooka: rng.pick(['off', 'half', 'always']) };
   const t0 = Date.now();
   let plan;
   try {
@@ -61,6 +61,9 @@ for (let r = 0; r < RACES; r++) {
     }
     duoTotal++;
   }
+  if (cfg.bazooka === 'always' && !plan.bazooka) { fails++; console.log('NO BAZOOKA', JSON.stringify(cfg)); }
+  if (cfg.bazooka === 'off' && plan.bazooka) { fails++; console.log('UNWANTED BAZOOKA', JSON.stringify(cfg)); }
+  if (plan.bazooka) bazookas++;
   if (N > 5) { const gap = plan.crossT[order[5]] - t5; gap56.push(gap); }
   if (plan.good) good++;
   totalLead += plan.leadChanges.length;
@@ -74,7 +77,7 @@ for (let r = 0; r < RACES; r++) {
 console.log(`races: ${RACES}  failures: ${fails}`);
 console.log(`"exciting" plans: ${(100 * good / RACES).toFixed(1)}%  avg lead changes: ${(totalLead / RACES).toFixed(1)}`);
 console.log(`winner already leading at 75%: ${(100 * w1LedAt75 / RACES).toFixed(1)}%   top-5 at 75% == winners: ${(100 * top5Was / RACES).toFixed(1)}%`);
-console.log(`slowest plan: ${slowest} ms   two-runner gags checked: ${duoTotal}`);
+console.log(`slowest plan: ${slowest} ms   two-runner gags checked: ${duoTotal}   bazookas: ${bazookas}`);
 gap56.sort((a, b) => a - b);
 console.log(`gap 5th->6th: median ${gap56[gap56.length >> 1].toFixed(3)}s  max ${gap56[gap56.length - 1].toFixed(3)}s`);
 process.exit(fails ? 1 : 0);

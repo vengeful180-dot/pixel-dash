@@ -262,7 +262,14 @@
       osc('sawtooth', 110, t, dur, 0.035 * FX, master, { hold: 0.9, release: 0.15, vibrato: true });
       osc('square', 220, t, dur, 0.015 * FX, master, { hold: 0.9, release: 0.15 });
     },
-    sputter() { for (let k = 0; k < 4; k++) tone(90 - k * 10, 0.07, 'square', 0.08, 50, k * 0.13); },
+    clack() { tone(900, 0.03, 'square', 0.08); tone(600, 0.04, 'square', 0.08, null, 0.09); },
+    launch() { noise(0.5, 0.45, 800, 'bandpass', 0, 3000); tone(1600, 0.6, 'sine', 0.06, 700, 0.05); },
+    boom() {
+      noise(1.6, 0.9, 1200, 'lowpass', 0, 90);
+      tone(70, 0.9, 'sine', 0.55, 28);
+      noise(0.25, 0.5, 4000, 'highpass');
+    },
+        sputter() { for (let k = 0; k < 4; k++) tone(90 - k * 10, 0.07, 'square', 0.08, 50, k * 0.13); },
     // current output loudness (RMS), handy for checking that sound is playing
     level() {
       if (!analyser) return 0;

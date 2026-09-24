@@ -78,7 +78,7 @@
     mode: 'setup', viewer: false, cfg: null, plan: null, looks: null, theme: THEMES.day,
     lanes: null, trackTile: null, skyTile: null, ads: [], banners: [],
     camX: 0, zoom: 1, now: 0, raceT: 0, timeScale: 1,
-    particles: [], flash: 0, fade: 0, big: null, line: null, excite: 0.3, sfxQ: [], extraBubbles: [],
+    particles: [], flash: 0, fade: 0, big: null, line: null, excite: 0.3, sfxQ: [], extraBubbles: [], words: [], shake: 0, hitStop: 0,
     gagPtr: 0, globPtr: 0, linePtr: 0, crossPtr: 0,
     marks: null, reveal: null, rowY: [], clockFrozen: null,
   };
@@ -678,6 +678,29 @@
         if (u < 0.15 || u > 0.88) run(0.45);
         else fixed('bow', () => Art.Pose.bow());
         break;
+      case 'bazooka': {
+        const bd = Planner.BAZOOKA;
+        if (u < bd.fire) fixed('aim', () => Art.Pose.aim());
+        else if (u < 0.8) { fixed('onback', () => Art.Pose.onBack()); res.dx = -Math.min(1, (u - bd.fire) / 0.1) * 6; }
+        else if (u < 0.88) fixed('kneel0', () => Art.Pose.kneel(0));
+        else run(0.45);
+        break;
+      }
+      case 'blast': {
+        const imp = Planner.BAZOOKA.impact;
+        if (u < imp) run();
+        else if (u < 0.62) {
+          // sent flying, spinning
+          const k = (u - imp) / (0.62 - imp);
+          const f = Math.floor(t * 14 + i) % 8;
+          fixed('star' + f, () => Art.Pose.star((f / 8) * TAU));
+          res.dy = -sn(Math.sin(k * Math.PI) * g.height);
+          res.dx = g.dir * Math.sin(k * Math.PI) * 16;
+        } else if (u < 0.84) fixed(i % 2 ? 'fallen' : 'onback', () => (i % 2 ? Art.Pose.fallen() : Art.Pose.onBack()));
+        else if (u < 0.92) fixed('kneel0', () => Art.Pose.kneel(0));
+        else run(0.45);
+        break;
+      }
       default: run(1.3);
     }
     return res;
@@ -732,7 +755,12 @@
       info.push({ i, x, gy, dy, st, pose });
     }
     // effects that sit behind runners
-    if (G.mode === 'race') for (const r of info) drawGagBack(r, cam, t);
+    if (G.mode === 'race') {
+      for (const r of info) drawGagBack(r, cam, t);
+      drawBazookaFx(info, cam, t, 'back');
+      drawNameTags(info);
+      drawGhosts(info, cam);
+    }
     for (const r of info) {
       if (r.x < -30 || r.x > VW + 30 || (r.st && r.st.hidden)) continue;
       drawRunnerSprite(r.i, r.pose.key, r.pose.make, r.x, r.gy, r.dy);
@@ -741,6 +769,7 @@
     if (G.mode === 'race') {
       for (const r of info) drawGagFront(r, cam, t);
       drawDuos(info, cam, t);
+      drawBazookaFx(info, cam, t, 'front');
     }
     return info;
   }
@@ -887,6 +916,152 @@
         }
         break;
       default:
+    }
+  }
+
+  // Name tags live in the scene, drawn before the runners, so a runner passing
+  // in front always covers the tag (never the other way round).
+  function drawNameTags(info) {
+    const u = view.s;
+    const order = stableOrder();
+    const place = new Array(G.plan.N);
+    order.forEach((i, k) => { place[i] = k; });
+    const fs = clamp(Math.min(6.4, G.lanes.laneH * 0.55), 9 / u, 17 / u);
+    w.font = '700 ' + fs.toFixed(2) + 'px "Pixelify Sans", monospace';
+    w.textBaseline = 'middle';
+    w.textAlign = 'left';
+    const maxName = Math.max(40, G.lanes.laneH * 5.5);
+    for (const r of info) {
+      if (r.x < 4 || r.x > VW + 10) continue;
+      let name = G.cfg.names[r.i];
+      while (name.length > 1 && w.measureText(name).width > maxName) name = name.slice(0, -1);
+      if (name !== G.cfg.names[r.i]) name += '…';
+      const label = (place[r.i] + 1) + '  ' + name;
+      const wdt = w.measureText(label).width + fs * 0.9;
+      const hgt = fs * 1.25;
+      const bx = r.x - 8 - wdt, by = r.gy - Math.min(9, G.lanes.laneH * 0.45) - hgt / 2;
+      const col = G.looks[r.i].color;
+      const c = Math.max(1, u * 0.8) / u; // notched pixel corners
+      w.fillStyle = 'rgba(10,10,24,0.85)';
+      w.fillRect(bx + c, by - c, wdt - 2 * c, hgt + 2 * c);
+      w.fillRect(bx - c, by + c, wdt + 2 * c, hgt - 2 * c);
+      w.fillRect(bx, by, wdt, hgt);
+      w.fillStyle = col;
+      w.fillRect(bx + c, by, wdt - 2 * c, hgt);
+      w.fillRect(bx, by + c, wdt, hgt - 2 * c);
+      w.fillStyle = lum(col) > 0.62 ? '#10101a' : '#ffffff';
+      w.fillText(label, bx + fs * 0.45, by + hgt / 2 + 0.3);
+    }
+  }
+
+  // In slow motion, the runners in the shot leave faint afterimages.
+  function drawGhosts(info, cam) {
+    const cg = G.camGag;
+    if (!cg || G.timeScale > 0.7) return;
+    const who = new Set([cg.i]);
+    if (cg.other != null) who.add(cg.other);
+    if ((cg.type === 'bazooka' || cg.fan) && G.plan.bazooka) G.plan.bazooka.victims.forEach((v) => who.add(v));
+    for (const i of who) {
+      const r = info[i];
+      if (!r || !r.st || r.st.hidden) continue;
+      [[0.07, 0.3], [0.14, 0.14]].forEach(([d, a]) => {
+        const x = runnerX(rstate(i, G.raceT - d).p) - cam + (r.st.dx || 0);
+        if (Math.abs(x - r.x) < 1.5 && !r.dy) return;
+        w.globalAlpha = a;
+        const spr = Art.runnerSprite(G.looks[i], r.pose.key, r.pose.make);
+        w.drawImage(spr, sn(x) - Art.SPRITE.OX, sn(r.gy - Art.SPRITE.OY + (r.dy || 0) * (1 - d * 3)));
+        w.globalAlpha = 1;
+      });
+    }
+  }
+
+  // pixel-art filled circle
+  function disc(cx, cy, r, col) {
+    w.fillStyle = col;
+    for (let y = -r; y <= r; y++) {
+      const hw = Math.round(Math.sqrt(Math.max(0, r * r - y * y)));
+      w.fillRect(sn(cx - hw), sn(cy + y), hw * 2 + 1, 1);
+    }
+  }
+
+  // Bazooka: dropped launcher + scorch mark behind, rocket + fireball + sooty faces in front.
+  function drawBazookaFx(info, cam, t, layer) {
+    const B = G.plan.bazooka;
+    if (!B) return;
+    const bd = Planner.BAZOOKA, dur = bd.dur;
+    const u = (G.raceT - B.t0) / dur;
+    if (u < -0.2) return;
+    const bp = blastPoint();
+    const ix = bp.x - cam, iy = bp.y;
+    const E = G.raceT - (B.t0 + bd.impact * dur); // seconds since the blast
+    if (layer === 'back') {
+      if (E > 0) {
+        w.globalAlpha = Math.max(0.25, 0.7 - E * 0.02);
+        w.fillStyle = '#2b1d18';
+        for (let y = -2; y <= 2; y++) w.fillRect(sn(ix - 16 + Math.abs(y) * 3), iy + 8 + y, 32 - Math.abs(y) * 6, 1);
+        w.globalAlpha = 1;
+      }
+      if (B.shooter >= 0 && u > bd.fire && u < 1.6) {
+        const sx = runnerX(rstate(B.shooter, B.t0 + bd.fire * dur).p) - cam - 16;
+        w.drawImage(Art.P.bazooka, sn(sx), G.lanes.ground(B.shooter) - 6);
+      }
+      return;
+    }
+    // launcher on the shoulder while aiming (runner) or up in the stands (fan)
+    if (u < bd.fire + 0.01) {
+      const sp = bazookaFrom(G.raceT);
+      w.drawImage(Art.P.bazooka, sn(sp.x - cam - 16), sn(sp.y - 3));
+      if (B.shooter < 0) { w.fillStyle = '#ffd23f'; w.fillRect(sn(sp.x - cam - 20), sn(sp.y - 6), 3, 3); }
+      if (u > bd.fire - 0.02) disc(sp.x - cam + 2, sp.y, 4, '#fff3b0');
+    }
+    // the rocket
+    if (u >= bd.fire && u < bd.impact) {
+      const k = (u - bd.fire) / (bd.impact - bd.fire);
+      const sp = bazookaFrom(B.t0 + bd.fire * dur);
+      const x = lerp(sp.x, bp.x, k) - cam, y = lerp(sp.y, iy, k) - Math.sin(k * Math.PI) * 10;
+      w.drawImage(Art.P.rocket, sn(x - 4), sn(y - 3));
+      w.fillStyle = Math.random() < 0.5 ? '#ffd23f' : '#ff7a2a';
+      w.fillRect(sn(x - 7), sn(y - 1), 3, 2);
+      if (Math.random() < 0.7) G.particles.push({ x: x + cam - 6, y: y, vx: -6, vy: -4, g: -2, life: 0, max: 0.9, col: '#bdbdbd', size: 2, world: true, spark: true });
+    }
+    // fireball and shockwave
+    if (E >= 0 && E < 1.2) {
+      const grow = Math.sqrt(Math.min(1, E / 0.3));
+      const R = 5 + 28 * grow;
+      const fade = Math.max(0, 1 - E / 1.2);
+      if (E < 0.45) {
+        w.globalAlpha = Math.max(0, 1 - E / 0.45) * 0.8;
+        w.strokeStyle = '#ffffff'; w.lineWidth = 1;
+        w.beginPath(); w.arc(ix, iy, 12 + E * 170, 0, TAU); w.stroke();
+        w.globalAlpha = 1;
+      }
+      if (E < 0.9) {
+        disc(ix, iy, Math.round(R), E < 0.1 ? '#ffffff' : E < 0.5 ? '#ff7a2a' : '#8a3b1f');
+        disc(ix, iy - 2, Math.round(R * 0.7), E < 0.15 ? '#fff3b0' : E < 0.55 ? '#ffd23f' : '#6b6b6b');
+        if (E < 0.4) disc(ix, iy - 3, Math.round(R * 0.4), '#ffffff');
+      }
+      w.globalAlpha = fade;
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * TAU + E * 2;
+        disc(ix + Math.cos(a) * R * 0.9, iy - 4 + Math.sin(a) * R * 0.5 - E * 14, Math.round(4 + E * 6), k % 2 ? '#7d7d7d' : '#9a9a9a');
+      }
+      w.globalAlpha = 1;
+    }
+    // sooty faces (with big white eyes) on everyone who got blasted
+    if (E > 0 && E < 6) {
+      const a = Math.min(1, (6 - E) / 1.5);
+      for (const v of B.victims.concat(B.shooter >= 0 ? [B.shooter] : [])) {
+        const r = info[v];
+        if (!r || r.x < -20 || r.x > VW + 20) continue;
+        const hx = r.x - 1, hy = r.gy - 28 + (r.dy || 0);
+        const flat = r.st && /fallen|onback|star/.test(r.pose.key);
+        if (flat) continue;
+        w.globalAlpha = a;
+        w.fillStyle = '#262626'; w.fillRect(sn(hx), sn(hy), 7, 5);
+        w.fillStyle = '#ffffff'; w.fillRect(sn(hx + 3), sn(hy + 1), 1, 1); w.fillRect(sn(hx + 5), sn(hy + 1), 1, 1);
+        w.globalAlpha = 1;
+        if (Math.random() < 0.05) G.particles.push({ x: r.x + cam + 1, y: hy - 2, vx: 0, vy: -10, g: -2, life: 0, max: 1, col: '#8d8d8d', size: 2, world: true, spark: true });
+      }
     }
   }
 
@@ -1076,12 +1251,29 @@
     const P = G.plan;
     for (const g of P.gags) {
       if (g.t0 > t + 0.4) break;
-      if (g.type === 'sleepy' || g.role === 'b' || g.t0 + g.dur > P.T1 - 2) continue;
+      if (g.type === 'sleepy' || g.role === 'b' || (g.role === 'victim' && !g.fan) || g.t0 + g.dur > P.T1 - 2) continue;
       if (t >= g.t0 - 0.35 && t < g.t0 + g.dur + 0.1) return g;
     }
     return null;
   }
+  // where the bazooka rocket lands (world coords)
+  function blastPoint() {
+    const B = G.plan.bazooka, bd = Planner.BAZOOKA;
+    return { x: runnerX(rstate(B.aim, B.t0 + bd.impact * bd.dur).p) + 2, y: G.lanes.ground(B.aim) - 8 };
+  }
+  function bazookaFrom(t) {
+    const B = G.plan.bazooka;
+    if (B.shooter >= 0) return { x: runnerX(rstate(B.shooter, t).p) + 13, y: G.lanes.ground(B.shooter) - 21 };
+    const bp = blastPoint();
+    return { x: bp.x - 95, y: 84 };
+  }
   function gagFocus(g, t) {
+    if (g.type === 'bazooka' || g.fan) {
+      const bd = Planner.BAZOOKA, u = (t - g.t0) / g.dur, bp = blastPoint();
+      if (u > bd.impact) return { x: bp.x, y: bp.y - 6 };
+      const sp = bazookaFrom(t);
+      return { x: (sp.x + bp.x) / 2, y: Math.max(sp.y, (sp.y + bp.y) / 2) };
+    }
     const a = runnerX(rstate(g.i, t).p), ya = G.lanes.ground(g.i);
     if (!g.duo) return { x: a, y: ya - 14 };
     const b = runnerX(rstate(g.other, t).p), yb = G.lanes.ground(g.other);
@@ -1226,7 +1418,7 @@
     flex: 'FLEX TIME', tired: 'OUT OF GAS', shoe: 'SHOE LOST!', ufo: 'ABDUCTION!', ufogood: 'ALIEN ASSIST', cartwheel: 'CARTWHEELS!',
     wave: 'HI MOM!', celebrate: 'TOO EARLY!', energy: 'POWER UP!', dog: 'DOG CHASE!', bees: 'BEES!!!', sneeze: 'ACHOO!',
     secondwind: 'SECOND WIND', rocket: 'ROCKET SHOES', scooter: 'E-SCOOTER!', pogo: 'POGO TIME', chickenhug: 'MASCOT HUG!', bow: 'TA-DA?!',
-    shove: 'PUSHY!', tripup: 'SNEAKY TRIP!', fight: 'FIGHT!', highfive: 'HIGH FIVE!', tackle: 'TACKLE!',
+    shove: 'PUSHY!', tripup: 'SNEAKY TRIP!', fight: 'FIGHT!', highfive: 'HIGH FIVE!', tackle: 'TACKLE!', bazooka: 'BAZOOKA!!',
     pie: 'PIE ATTACK!', balloon: 'WATER BOMB!', tomato: 'TOMATO!', chicken: 'CHICKEN STRIKE!',
   };
   function showCard(g, F) {
@@ -1236,6 +1428,10 @@
       hot = true;
       title = F.kind === 'solo' ? CARD[F.type] : F.kind === 'throw' ? CARD[F.variant] : CARD[F.type];
       sub = F.kind === 'solo' ? nm(F.target) + ' was about to win...' : nm(F.actor) + ' → ' + nm(F.target);
+    } else if (g.type === 'bazooka' || g.fan) {
+      hot = true;
+      title = CARD.bazooka;
+      sub = (g.fan ? 'A fan' : nm(g.i)) + ' → the front of the pack';
     } else {
       title = g.type === 'throw' ? CARD[g.variant] : CARD[g.type] || 'WHOA!';
       if (!g.duo) sub = nm(g.i);
@@ -1245,6 +1441,37 @@
     }
     G.card = { title, sub, hot, at: G.now, out: null };
   }
+  // Comic-book impact words: pop in on a starburst, hang a moment, fade.
+  function renderWords() {
+    const u = view.s;
+    G.words = G.words.filter((wd) => G.now - wd.at < 1.1);
+    for (const wd of G.words) {
+      const age = G.now - wd.at;
+      const pop = age < 0.1 ? age / 0.1 * 1.25 : Math.max(1, 1.25 - (age - 0.1) * 1.5);
+      const alpha = age > 0.75 ? Math.max(0, 1 - (age - 0.75) / 0.35) : 1;
+      const cx = SX(wd.x - G.camX), cy = SY(wd.y);
+      const size = (wd.big ? 20 : 11) * u * pop;
+      sctx.globalAlpha = alpha;
+      // starburst
+      const pts = 12, r1 = size * (wd.big ? 2.6 : 2.1), r2 = r1 * 0.62;
+      sctx.beginPath();
+      for (let k = 0; k < pts * 2; k++) {
+        const a = (k / (pts * 2)) * TAU + wd.at;
+        const rr = k % 2 ? r2 : r1;
+        const px = cx + Math.cos(a) * rr * 1.25, py = cy + Math.sin(a) * rr * 0.75;
+        if (k) sctx.lineTo(px, py); else sctx.moveTo(px, py);
+      }
+      sctx.closePath();
+      sctx.fillStyle = wd.big ? '#ff5a1f' : '#ffd23f';
+      sctx.fill();
+      sctx.lineWidth = Math.max(2, u * 1.2);
+      sctx.strokeStyle = '#10101a';
+      sctx.stroke();
+      txt(wd.word, cx, cy + size * 0.08, size, wd.big ? '#fff3b0' : '#e53935', { weight: 700, title: true, align: 'center', stroke: '#10101a', strokeW: size * 0.32 });
+      sctx.globalAlpha = 1;
+    }
+  }
+
   function renderCard() {
     const c = G.card;
     if (!c) return;
@@ -1318,7 +1545,6 @@
       for (const r of info) {
         const look = G.looks[r.i];
         const name = G.cfg.names[r.i];
-        const label = (place[r.i] + 1) + '  ' + fit(name, fs, Math.max(40, G.lanes.laneH * 5.5) * u, 700);
         const yy = SY(r.gy - Math.min(9, G.lanes.laneH * 0.45));
         if (r.x < 4) {
           const s = '◀ ' + (place[r.i] + 1) + ' ' + fit(name, fs * 0.9, 60 * u, 700);
@@ -1327,16 +1553,12 @@
           txt(s, X0 + 2 * u + fs * 0.4, yy, fs * 0.9, look.color, { weight: 700 });
           continue;
         }
-        if (r.x > VW + 10) continue;
-        const wdt = tw(label, fs, 700) + fs * 0.9;
-        const bx = SX(r.x - 8) - wdt;
-        const col = look.color;
-        pbox(bx, yy - fs * 0.62, wdt, fs * 1.25, Math.max(1, u * 0.8), col, 'rgba(10,10,24,0.85)');
-        txt(label, bx + fs * 0.45, yy + 0.5, fs, lum(col) > 0.62 ? '#10101a' : '#ffffff', { weight: 700 });
+        // on-screen tags are drawn in the scene, underneath the runners (see drawNameTags)
       }
       // speech bubbles: runners, plus the referee
       const bubble = (x, y, text) => {
-        if (x < -10 || x > VW + 10) return;
+        const vx0 = crop.x, vx1 = crop.x + crop.w;
+        if (x < vx0 + 6 || x > vx1 - 2) return; // only for runners actually in view
         const bs = clamp(7 * u, 11, 20);
         const wdt = tw(text, bs, 700) + bs * 1.1;
         const px = SX(x);
@@ -1358,7 +1580,7 @@
 
     }
 
-    if (G.mode === 'race') renderCard();
+    if (G.mode === 'race') { renderWords(); renderCard(); }
 
     // commentary box
     if (G.line && (G.mode === 'race' || G.mode === 'marks' || G.mode === 'reveal')) {
@@ -1614,6 +1836,7 @@
     G.plan.gags.forEach((g) => { delete g._puffed; delete g._p; delete g._shoe; delete g._hit; delete g._park; delete g._dust; });
     G.sfxQ = []; G.camGag = null; G.focus = null; G.focusT = null;
     G.card = null; G.finaleCard = false; G.zoomT = 1; G.zv = 0; G.lb = 0; G.lbT = 0; G.camCenter = null;
+    G.words = []; G.shake = 0; G.hitStop = 0;
     const r = Planner.makeRng(G.plan.seed ^ 0xfa15e);
     const fsI = r.chance(0.3) ? r.int(0, G.plan.N - 1) : -1;
     const setDelay = r.range(0.9, 1.7);
@@ -1642,11 +1865,49 @@
     G.marks = m;
   }
 
-  // queue a sound for a moment of race time
+  // queue a sound (or effect) for a moment of race time
   function sfxAt(t, fn) { G.sfxQ.push({ t, fn }); G.sfxQ.sort((a, b) => a.t - b.t); }
+  // something lands: freeze a split second, shake the camera, pop a comic word
+  function impact(i, t, word, big) {
+    const x = runnerX(rstate(i, t).p), y = G.lanes.ground(i) - 30;
+    G.words.push({ x, y, word, at: G.now, big: !!big });
+    G.shake = Math.max(G.shake || 0, big ? 7 : 2.5);
+    G.hitStop = big ? 0.25 : 0.1;
+  }
+  function scheduleBazooka(g) {
+    const bd = Planner.BAZOOKA, B = G.plan.bazooka;
+    const at = (u, fn) => sfxAt(g.t0 + u * g.dur, fn);
+    Sfx.clack();
+    at(bd.fire, () => { Sfx.launch(); G.flash = Math.max(G.flash, 0.25); });
+    at(bd.impact, () => {
+      Sfx.boom(); Sfx.cheer(1.2);
+      G.flash = 0.9;
+      impact(B.aim, g.t0 + bd.impact * g.dur, 'KA-BOOM!', true);
+      const bp = blastPoint();
+      for (let k = 0; k < 26; k++) G.particles.push({ x: bp.x + (Math.random() - 0.5) * 30, y: bp.y - Math.random() * 10, vx: (Math.random() - 0.5) * 30, vy: -12 - Math.random() * 20, g: -3, life: 0, max: 1.6 + Math.random() * 1.4, col: k % 3 ? '#8d8d8d' : '#5c5c5c', size: 3, world: true, spark: true });
+      for (let k = 0; k < 22; k++) G.particles.push({ x: bp.x, y: bp.y, vx: (Math.random() - 0.5) * 160, vy: -40 - Math.random() * 90, g: 160, life: 0, max: 0.9, col: k % 2 ? '#c4553b' : '#e9e4dc', size: 2, world: true });
+      for (let k = 0; k < 18; k++) G.particles.push({ x: bp.x, y: bp.y, vx: (Math.random() - 0.5) * 200, vy: -30 - Math.random() * 120, g: 90, life: 0, max: 0.6, col: k % 2 ? '#ffd23f' : '#ff7a2a', size: 1, world: true, spark: true });
+    });
+  }
+  const HIT_WORD = { pie: 'SPLAT!', balloon: 'SPLOOSH!', tomato: 'SQUISH!', chicken: 'BONK!' };
   function fireGag(g) {
     if (g.role === 'b') return;
+    if (g.type === 'bazooka' || (g.type === 'blast' && g.fan)) { scheduleBazooka(g); return; }
+    if (g.type === 'blast') return;
     const at = (u, fn) => sfxAt(g.t0 + u * g.dur, fn);
+    const hit = (u, who, word) => at(u, () => impact(who, g.t0 + u * g.dur, word));
+    if (g.duo) {
+      const imp = Planner.DUO[g.type].impact;
+      if (g.type === 'throw') hit(imp, g.other, HIT_WORD[g.variant]);
+      else if (g.type === 'shove') hit(imp, g.other, 'SHOVE!');
+      else if (g.type === 'tripup') hit(0.3, g.other, 'WHAM!');
+      else if (g.type === 'tackle') hit(imp, g.other, 'CRASH!');
+      else if (g.type === 'fight') { hit(0.14, g.i, 'POW!'); hit(0.42, g.other, 'BIFF!'); hit(0.64, g.i, 'ZOK!'); }
+      else if (g.type === 'highfive') hit(imp, g.i, 'SLAP!');
+    } else if (g.type === 'trip') hit(0.12, g.i, 'THUD!');
+    else if (g.type === 'banana') hit(0.3, g.i, 'WHOOPS!');
+    else if (g.type === 'chickenhug') hit(0.2, g.i, 'HUG!');
+    else if (g.type === 'sneeze') hit(0.3, g.i, 'ACHOO!');
     if (g.duo) {
       const imp = Planner.DUO[g.type].impact;
       if (g.type === 'throw') {
@@ -1688,14 +1949,17 @@
     const cg = camGag(T);
     if (cg !== G.camGag && cg) { Sfx.whoosh(); showCard(cg); }
     G.camGag = cg;
-    const gagSlow = cg && T > cg.t0 - 0.05 && T < cg.t0 + Math.min(cg.dur * 0.8, 2.4);
-    G.timeScale = lerp(G.timeScale, slow ? 0.3 : gagSlow ? 0.5 : 1, 1 - Math.exp(-dt * 6));
+    const isBz = cg && (cg.type === 'bazooka' || cg.fan);
+    const gu = cg ? (T - cg.t0) / cg.dur : 0;
+    const gagSlow = cg && T > cg.t0 - 0.05 && T < cg.t0 + Math.min(cg.dur * 0.9, 3.0);
+    const gagScale = isBz ? (gu > 0.08 && gu < 0.75 ? 0.22 : 0.5) : 0.38;
+    G.timeScale = lerp(G.timeScale, slow ? 0.3 : gagSlow ? gagScale : 1, 1 - Math.exp(-dt * 6));
     if (slow !== G.slowOn) { G.slowOn = slow; Sfx.musicMix(slow ? 0.6 : 1, slow); }
     const finaleShot = F && T > F.tg - 0.5 && T < F.tg + 0.9;
     if (finaleShot && !G.finaleCard) { G.finaleCard = true; Sfx.whoosh(); showCard(null, F); }
     const finishZoom = T > (F ? F.tg + 0.9 : P.T1 - 1.7) && T < P.T5 + 0.7;
     const gagZoom = cg && T < cg.t0 + cg.dur;
-    G.zoomT = finaleShot ? 1.42 : finishZoom ? 1.22 : gagZoom ? 1.32 : 1;
+    G.zoomT = finaleShot ? 1.42 : finishZoom ? 1.22 : gagZoom ? (isBz ? (gu > Planner.BAZOOKA.impact ? 1.5 : 1.25) : 1.32) : 1;
     G.lbT = finaleShot || finishZoom || gagZoom ? 1 : 0;
     G.camCenter = null;
     if (finaleShot) {
@@ -1704,7 +1968,9 @@
     } else if (finishZoom) G.focusT = { x: FINISH_X(), y: TRACK_TOP + G.lanes.trackH * 0.42 };
     else if (cg) { G.focusT = gagFocus(cg, T); G.camCenter = G.focusT.x; }
     if (G.card && !cg && !finaleShot && !G.card.out) G.card.out = G.now;
-    const sdt = dt * G.timeScale;
+    // hit-stop: a split-second freeze when something lands
+    let sdt = dt * G.timeScale;
+    if (G.hitStop > 0) { G.hitStop -= dt; sdt *= 0.06; }
     G.raceT += sdt;
     const t = G.raceT;
 
@@ -1777,7 +2043,8 @@
         G.zoom = Math.max(1, G.zoom + G.zv * dt);
         G.lb = lerp(G.lb || 0, G.lbT || 0, 1 - Math.exp(-dt * 7));
       } else { G.zoom = 1; G.zv = 0; G.lb = lerp(G.lb || 0, 0, 1 - Math.exp(-dt * 7)); }
-      const z = G.zoom;
+      G.shake = (G.shake || 0) * Math.exp(-dt * 9);
+      const z = Math.max(G.zoom, 1 + G.shake * 0.012);
       if (G.focusT) {
         if (!G.focus) G.focus = { x: G.focusT.x, y: G.focusT.y, vx: 0, vy: 0 };
         const f = G.focus;
@@ -1785,8 +2052,10 @@
         f.vy += (45 * (G.focusT.y - f.y) - 13.4 * f.vy) * dt;
         f.x += f.vx * dt; f.y += f.vy * dt;
       }
-      if (z > 1.01 && G.mode === 'race' && G.focus) {
-        const cx = clamp(G.focus.x - G.camX, 0, VW), cy = G.focus.y;
+      if (z > 1.01 && G.mode === 'race') {
+        const fcs = G.focus || { x: G.camX + VW / 2, y: VH / 2 };
+        const sh = G.shake > 0.2 ? G.shake : 0;
+        const cx = clamp(fcs.x - G.camX, 0, VW) + (Math.random() - 0.5) * 2 * sh, cy = fcs.y + (Math.random() - 0.5) * 2 * sh;
         const cw = VW / z, ch = VH / z;
         crop = { x: clamp(cx - cw * 0.5, 0, VW - cw), y: clamp(cy - ch * 0.55, 0, VH - ch), w: cw, h: ch };
       } else crop = { x: 0, y: 0, w: VW, h: VH };
@@ -1823,7 +2092,7 @@
     return bytes.map((b) => b ^ Math.floor(r.next() * 256));
   }
   function encodeCfg(cfg) {
-    const obj = { v: 1, t: cfg.title, n: cfg.names, w: cfg.winners, l: cfg.length, c: cfg.chaos, s: cfg.seed };
+    const obj = { v: 1, t: cfg.title, n: cfg.names, w: cfg.winners, l: cfg.length, c: cfg.chaos, b: cfg.bazooka, s: cfg.seed };
     const bytes = scramble(new TextEncoder().encode(JSON.stringify(obj)));
     let bin = '';
     bytes.forEach((b) => { bin += String.fromCharCode(b); });
@@ -1835,11 +2104,12 @@
     const bin = atob(b64);
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     const o = JSON.parse(new TextDecoder().decode(scramble(bytes)));
-    const cfg = { title: String(o.t || 'Pixel Dash').slice(0, 40), names: o.n, winners: o.w, length: o.l, chaos: o.c, seed: o.s >>> 0 };
+    const cfg = { title: String(o.t || 'Pixel Dash').slice(0, 40), names: o.n, winners: o.w, length: o.l, chaos: o.c, bazooka: o.b, seed: o.s >>> 0 };
     if (!Array.isArray(cfg.names) || cfg.names.length < 5 || cfg.names.length > 20) throw new Error('bad names');
     cfg.names = cfg.names.map((s) => String(s).slice(0, 20));
     if (!Planner.LENGTHS[cfg.length]) cfg.length = 'classic';
     if (!['calm', 'normal', 'chaos'].includes(cfg.chaos)) cfg.chaos = 'normal';
+    if (!['off', 'half', 'always'].includes(cfg.bazooka)) cfg.bazooka = 'half';
     return cfg;
   }
 
@@ -1912,7 +2182,7 @@
   // ---------------------------------------------------------------- host panel
   const EXAMPLE = ['Alex', 'Sam', 'Jordan', 'Taylor', 'Morgan', 'Riley', 'Casey', 'Jamie', 'Charlie', 'Robin'];
   const setup = {
-    length: 'classic', chaos: 'normal',
+    length: 'classic', chaos: 'normal', bazooka: 'half',
   };
   function readNames() {
     return $('f-names').value.split('\n').map((s) => s.trim().slice(0, 20)).filter(Boolean);
@@ -1953,9 +2223,9 @@
     if (winners.some((x) => x < 0)) return err('Pick all 5 winners (1st to 5th).');
     if (new Set(winners).size !== 5) return err('Each winner must be a different runner.');
     const title = ($('f-title').value.trim() || 'The Grand Pixel Dash').slice(0, 40);
-    const cfg = { title, names, winners, length: setup.length, chaos: setup.chaos, seed: (Math.random() * 4294967296) >>> 0 };
+    const cfg = { title, names, winners, length: setup.length, chaos: setup.chaos, bazooka: setup.bazooka, seed: (Math.random() * 4294967296) >>> 0 };
     try {
-      localStorage.setItem('pd-setup', JSON.stringify({ title, names, winners: winners.map((i) => names[i]), length: cfg.length, chaos: cfg.chaos }));
+      localStorage.setItem('pd-setup', JSON.stringify({ title, names, winners: winners.map((i) => names[i]), length: cfg.length, chaos: cfg.chaos, bazooka: cfg.bazooka }));
     } catch (e) { /* storage blocked */ }
     return cfg;
   }
@@ -1966,6 +2236,7 @@
     $('f-names').value = ((saved && saved.names) || EXAMPLE).join('\n');
     if (saved && saved.length) setup.length = saved.length;
     if (saved && saved.chaos) setup.chaos = saved.chaos;
+    if (saved && saved.bazooka) setup.bazooka = saved.bazooka;
     refreshWinnerSelects(saved && saved.winners ? saved.winners : ['', '', '', '', '']);
     const seg = (id, key) => {
       const btns = [...$(id).querySelectorAll('button')];
@@ -1975,6 +2246,7 @@
     };
     seg('f-length', 'length');
     seg('f-chaos', 'chaos');
+    seg('f-bazooka', 'bazooka');
     $('f-names').addEventListener('input', () => refreshWinnerSelects());
     document.querySelectorAll('.winners select').forEach((s) => s.addEventListener('change', syncDisabled));
     $('f-example').addEventListener('click', () => { $('f-names').value = EXAMPLE.join('\n'); refreshWinnerSelects(); });

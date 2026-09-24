@@ -445,6 +445,16 @@
       p.mouth = 'smile';
       return p;
     },
+    // bazooka on the shoulder
+    aim() {
+      const p = base();
+      p.arms = [[1.35, 0.25], [1.1, 0.5]];
+      p.legs = [[0.35, 0.1], [-0.35, 0.1]];
+      p.lean = -0.08;
+      p.eyes = 'half';
+      p.mouth = 'smile';
+      return p;
+    },
     // superhero dive at the finish line
     dive() {
       const p = base();
@@ -792,6 +802,14 @@
     ], { w: '#e6dfd2', W: '#ffffff' }, true);
     P.heart = pixmap(['.p.p.', 'ppppp', '.ppp.', '..p..'], { p: '#ff5c8a' }, false);
     P.fist = pixmap(['sss', 'sss'], { s: '#f2c7a0' }, true);
+    P.bazooka = pixmap([
+      '..........yy......',
+      'kkoooooooooooooookk',
+      'kooOOOOOOOOOOOOOOok',
+      'kkoooooooooooooookk',
+      '......kk..kk.......',
+    ], { o: '#5b6b2e', O: '#7d8f3f', k: '#23291a', y: '#ffd23f' }, true);
+    P.rocket = pixmap(['.gg....', 'ggwwwwr', 'wwwwwwrr', 'ggwwwwr', '.gg....'], { g: '#4a5d23', w: '#d9dde6', r: '#e53935' }, true);
   }
 
   // Build a blimp with a message printed on it.
