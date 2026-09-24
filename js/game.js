@@ -2239,6 +2239,7 @@
     if (saved && saved.bazooka) setup.bazooka = saved.bazooka;
     refreshWinnerSelects(saved && saved.winners ? saved.winners : ['', '', '', '', '']);
     const seg = (id, key) => {
+      if (!$(id)) return; // an older cached page may not have this setting
       const btns = [...$(id).querySelectorAll('button')];
       const upd = () => btns.forEach((b) => b.classList.toggle('on', b.dataset.v === setup[key]));
       btns.forEach((b) => b.addEventListener('click', () => { setup[key] = b.dataset.v; upd(); }));

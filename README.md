@@ -53,6 +53,8 @@ python3 -m http.server 8000
 
 Run the planner tests with `npm test` (or `node test/planner.test.js 1000`).
 
+When you publish changes, bump the `?v=` number on the CSS and JS links in `index.html`. Browsers cache files on GitHub Pages for a few minutes, and the new number makes them fetch the new versions together instead of mixing old and new files.
+
 ## Publishing on GitHub Pages
 
 Settings → Pages → *Build and deployment* → Source: **Deploy from a branch** → Branch: `main`, folder `/ (root)` → Save. After a minute the site is live at `https://<your-user>.github.io/pixel-dash/`.
