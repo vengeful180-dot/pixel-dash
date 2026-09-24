@@ -26,11 +26,13 @@
   const EPS = 0.02;     // no loser crosses earlier than 5th place + EPS
 
   const LENGTHS = {
-    sprint:  { meters: 200, vref: 8.4, spread: 0.7, label: '200 M' },
-    classic: { meters: 400, vref: 8.8, spread: 1.0, label: '400 M' },
-    epic:    { meters: 800, vref: 8.3, spread: 1.45, label: '800 M' },
+    sprint:  { meters: 200, vref: 7.0, spread: 0.7, label: '200 M' },
+    classic: { meters: 400, vref: 7.2, spread: 1.0, label: '400 M' },
+    epic:    { meters: 800, vref: 7.4, spread: 1.45, label: '800 M' },
   };
-  const CHAOS_GAP = { calm: 7.5, normal: 4.2, chaos: 2.6 };
+  // average seconds between gags; gags never overlap, so each joke gets its moment
+  const CHAOS_GAP = { calm: 11, normal: 7, chaos: 4.5 };
+  const GAG_GAP = 1.6;
 
   // ---------------------------------------------------------------- RNG
   function mulberry32(a) {
@@ -113,6 +115,8 @@
     rocket:     { kind: 'good', dur: 1.6, speed: () => 1.8 },
     ufogood:    { kind: 'good', dur: 2.6, speed: (u) => (u < 0.25 ? 0.2 : u < 0.85 ? 1.9 : 0) },
   };
+  // stretch every gag a little so viewers can follow it
+  for (const k in GAGS) GAGS[k].dur *= 1.25;
   const BAD = Object.keys(GAGS).filter((k) => GAGS[k].kind === 'bad');
   const GOOD = Object.keys(GAGS).filter((k) => GAGS[k].kind === 'good');
   const EARLY_DISASTER = ['trip', 'wrongway', 'laces', 'shoe', 'banana', 'moonwalk', 'selfie', 'ufo', 'cramp', 'hotdog'];
@@ -412,8 +416,11 @@
       typeUse[t] = (typeUse[t] || 0) + 1;
       return t;
     };
-    const winnerBadCutoff = ta - 6.5;
-    const winnerGoodCutoff = ta - 4;
+    const winnerBadCutoff = ta - 8;
+    const winnerGoodCutoff = ta - 5;
+    // only one thing happens at a time
+    const clear = (t0, dur) => gags.every((g) => t0 + dur + GAG_GAP < g.t0 || t0 > g.t0 + g.dur + GAG_GAP)
+      && globals.every((g) => t0 + dur + 1 < g.t0 || t0 > g.t0 + 2.5);
 
     if (!safe) {
       // someone sleeps through the gun
@@ -424,34 +431,37 @@
         byRunner[i].push(gags[gags.length - 1]);
       }
       // comeback winners start with a disaster
+      const tryPlace = (i, type, lo, hi, durScale) => {
+        const dur = GAGS[type].dur * (durScale || 1);
+        for (let k = 0; k < 8; k++) {
+          const t0 = rng.range(lo, Math.max(lo + 0.1, hi));
+          if (clear(t0, dur) && free(i, t0, dur, 1)) return addGag(i, type, t0, durScale);
+        }
+        return null;
+      };
+      // one fading favourite blows it at the end (placed first: it's the finale)
+      const fakes = losers.filter((l) => role[l] === 'fake' && l !== heartbreak);
+      if (fakes.length && rng.chance(0.8)) {
+        tryPlace(rng.pick(fakes), pickType(LATE_FADE), ta - 0.8, ta + Math.min(1.2, A - 1.4), 0.8);
+      }
+      // comeback winners start with a disaster
       for (const w of W) {
         if (role[w] !== 'comeback') continue;
-        const t0 = rng.range(1.8, Math.max(2.4, 0.3 * T1));
         const type = pickType(EARLY_DISASTER);
-        if (t0 + GAGS[type].dur < winnerBadCutoff && free(w, t0, GAGS[type].dur, 1)) addGag(w, type, t0);
+        tryPlace(w, type, 2.5, Math.min(0.35 * T1, winnerBadCutoff - GAGS[type].dur));
       }
       // early bolters get a boost
       for (const l of losers) {
         if (role[l] !== 'bolter' || !rng.chance(0.6)) continue;
-        const t0 = rng.range(2.0, Math.max(2.5, 0.2 * T1));
-        const type = pickType(GOOD);
-        if (free(l, t0, GAGS[type].dur, 1)) addGag(l, type, t0);
-      }
-      // fading favourites blow it at the end
-      for (const l of losers) {
-        if (role[l] !== 'fake' || l === heartbreak || !rng.chance(0.75)) continue;
-        const t0 = ta + rng.range(-0.8, Math.min(1.4, A - 1.2));
-        const type = pickType(LATE_FADE);
-        if (free(l, t0, GAGS[type].dur, 0.5)) addGag(l, type, t0, 0.8);
+        tryPlace(l, pickType(GOOD), 2.5, 0.25 * T1);
       }
       // everything else
       const gap = CHAOS_GAP[cfg.chaos] || CHAOS_GAP.normal;
       let ts = rng.range(1.8, 3.2);
       const gagCount = [...Array(N)].map((_, i) => byRunner[i].length);
-      while (ts < ta + 1.0) {
-        const near = gags.some((g) => Math.abs(g.t0 - ts) < 0.9);
-        if (!near) {
-          if (ts > 4 && ts < ta - 2 && rng.chance(0.17)) {
+      while (ts < ta - 1.0) {
+        if (clear(ts, 1.2)) {
+          if (ts > 5 && ts < ta - 4 && globals.length < 2 && rng.chance(0.2)) {
             const types = Object.keys(GLOBALS).filter((k) => !globals.some((g) => g.type === k));
             if (types.length) {
               const type = rng.pick(types);
@@ -464,7 +474,7 @@
             const dur = GAGS[type].dur;
             const cands = [];
             for (let i = 0; i < N; i++) {
-              if (!free(i, ts, dur, 2.5)) continue;
+              if (!clear(ts, dur) || !free(i, ts, dur, 2.5)) continue;
               if (exact[i]) {
                 if (kind === 'bad' && ts + dur > winnerBadCutoff) continue;
                 if (kind === 'good' && ts + dur > winnerGoodCutoff) continue;
@@ -615,8 +625,14 @@
       if (pool) ev.push({ t: g.t0 + (g.type === 'sleepy' ? 0.6 : 0.15), prio: 3, lines: [fill(pickLine(pool), { n: nm(g.i) })] });
     }
     for (const g of plan.globals) ev.push({ t: g.t0 + 0.4, prio: 2, lines: [pickLine(TXT.global[g.type])] });
+    // lead changes: only call out a new leader who holds it a while, and not too often
+    let lastLeadLine = -99;
     plan.leadChanges.forEach((lc, idx) => {
       if (idx === 0 && lc.t < 3) return;
+      const next = plan.leadChanges[idx + 1];
+      const held = (next ? next.t : plan.T1) - lc.t;
+      if (held < 2.5 || lc.t - lastLeadLine < 9) return;
+      lastLeadLine = lc.t;
       ev.push({ t: lc.t, prio: 3.5, lines: [fill(pickLine(TXT.lead), { n: nm(lc.i) })] });
     });
     const half = timeLeaderReaches(plan.D / 2);
@@ -629,17 +645,18 @@
     if (m50) ev.push({ t: m50, prio: 5, lines: [pickLine(TXT.m50)] });
     ev.push({ t: plan.T1 - 0.5, prio: 7, lines: [pickLine(TXT.finish)] });
 
-    const lineDur = (s) => clamp(1.5 + s.length * 0.045, 2.2, 4.4);
+    const lineDur = (s) => clamp(2.2 + s.length * 0.055, 3, 5.5);
     const slots = [];
-    const fits = (a, b) => slots.every((s) => b <= s.t || a >= s.t + s.dur);
+    // leave a short breather between lines
+    const fits = (a, b) => slots.every((s) => b + 0.5 <= s.t || a >= s.t + s.dur + 0.5);
     const place = (e) => {
-      const total = e.lines.reduce((acc, s) => acc + lineDur(s), 0);
-      const maxDelay = e.prio >= 4 ? 2.5 : e.prio >= 3 ? 1.3 : 0.9;
+      const total = e.lines.reduce((acc, s) => acc + lineDur(s) + 0.5, 0) - 0.5;
+      const maxDelay = e.prio >= 4 ? 3 : e.prio >= 3 ? 1.8 : 1.2;
       for (let d = 0; d <= maxDelay; d += 0.1) {
         const a = e.t + d;
         if (fits(a, a + total)) {
           let tt = a;
-          for (const s of e.lines) { slots.push({ t: tt, dur: lineDur(s), text: s }); tt += lineDur(s); }
+          for (const s of e.lines) { slots.push({ t: tt, dur: lineDur(s), text: s }); tt += lineDur(s) + 0.5; }
           return true;
         }
       }
@@ -658,12 +675,12 @@
         rand: nm(r[rng.int(0, N - 1)]), lane: String(rng.int(1, N)),
       };
       const lines = bit.map((s) => fill(s, vars));
-      const total = lines.reduce((acc, s) => acc + lineDur(s), 0);
-      if (fits(t - 1.2, t + total + 0.6)) {
+      const total = lines.reduce((acc, s) => acc + lineDur(s) + 0.5, 0);
+      if (fits(t - 2.5, t + total + 2)) {
         let tt = t;
-        for (const s of lines) { slots.push({ t: tt, dur: lineDur(s), text: s }); tt += lineDur(s); }
+        for (const s of lines) { slots.push({ t: tt, dur: lineDur(s), text: s }); tt += lineDur(s) + 0.5; }
         bi++;
-        t += total + 2;
+        t += total + 5;
       }
     }
     slots.sort((a, b) => a.t - b.t);
@@ -686,7 +703,7 @@
       ufogood: ['THANKS, ALIENS!', 'BEAM ME UP!'],
     };
     plan.bubbles = plan.gags.map((g) => ({
-      i: g.i, t0: g.t0 + 0.05, t1: g.t0 + Math.min(g.dur, 1.9) + 0.25, text: rng.pick(BUB[g.type] || ['!?']),
+      i: g.i, t0: g.t0 + 0.05, t1: g.t0 + Math.min(g.dur, 3) + 0.3, text: rng.pick(BUB[g.type] || ['!?']),
     }));
 
     // bios for the intro screen

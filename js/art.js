@@ -92,13 +92,16 @@
   }
   function drawText(ctx, s, x, y, color, scale) {
     scale = scale || 1;
+    // on the hi-res world canvas, snap to its finer grid; elsewhere to whole pixels
+    const k = ctx === Art.worldCtx ? Art.K || 1 : 1;
+    const R = (v) => Math.round(v * k) / k;
     ctx.fillStyle = color;
     s = String(s).toUpperCase();
     for (let n = 0; n < s.length; n++) {
       const g = GLYPHS[s[n]];
       if (!g) continue;
       for (let i = 0; i < 15; i++) {
-        if (g[i] === '1') ctx.fillRect(Math.round(x + (n * 4 + (i % 3)) * scale), Math.round(y + Math.floor(i / 3) * scale), scale, scale);
+        if (g[i] === '1') ctx.fillRect(R(x + (n * 4 + (i % 3)) * scale), R(y + Math.floor(i / 3) * scale), scale, scale);
       }
     }
   }

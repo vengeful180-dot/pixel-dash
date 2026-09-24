@@ -7,7 +7,7 @@ A pixel-art stadium race where anything can happen: banana peels, runaway dogs, 
 1. Open the site. You land on the **host panel**.
 2. Enter the runners, one name per line (5 to 20).
 3. Pick your **top 5**, 1st to 5th.
-4. Choose a race length (200 m / 400 m / 800 m) and a chaos level.
+4. Choose a race length (200 m ≈ 30 s, 400 m ≈ 1 min, 800 m ≈ 2 min) and how many gags you want.
 5. Either:
    - **▶ Start race here** to play it on your own screen (great for screen-sharing or a projector), or
    - **🔗 Create share link** to get a link to send around. Everyone who opens it sees a start screen with the runners, presses *Start the race*, and watches the same race.
@@ -21,7 +21,9 @@ Your picks are scrambled inside the link. Viewers never see the host panel or an
 - Stadium events: the crowd does the wave, ducks cross the infield, the mascot joins in, a blimp flies over, and somebody fires the confetti cannon early.
 - Two commentators react to the gags, lead changes and the final stretch, with banter in between.
 - A slow-motion photo finish, then a podium ceremony that reveals 5th to 1st, plus a note on who just missed out in 6th.
-- Day, sunset and night stadiums, fan banners with the runners' names, live standings and a mini-map.
+- Day, sunset and night stadiums, fan banners with the runners' names, a live top-5 bar and a mini-map.
+- An original chiptune theme song that starts with the starting gun, picks up in the final stretch, goes muffled during the slow-motion finish and comes back for the podium.
+- Gags happen one at a time, with a pause in between, so every joke has room to land.
 
 ## How the rigging works
 
